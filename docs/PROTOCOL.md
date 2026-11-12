@@ -60,7 +60,7 @@ One physical device can expose several of the above interfaces; the app groups t
 
 ### 2.3 Mouse / receiver transports
 
-Selected by product JSON `protocol` field (`"1k" | "4k" | "8k" | "8k_nordic" | "kc_lite"`) and work mode:
+Selected by product JSON `protocol` field (`"1k" | "4k" | "8k" | "8k_nordic" | "kc_lite"`) and work mode. **The deciding rule (launcher `createByMouse`)**: if the dongle exposes a 0xFFC1 `mouse` collection, the wire protocol is **"8k"** (reportId 181/182) *regardless of the paired mouse's polling rate* — a 1k-polling M6 behind a Link-KM dongle speaks the 8k report protocol. "1k" applies only to dongles exposing just the bridge collection; "4k"/"8k_nordic" to 0xFF0A dongles.
 
 | Protocol | reportId | Buffer | Checksum |
 |---|---|---|---|
@@ -69,6 +69,8 @@ Selected by product JSON `protocol` field (`"1k" | "4k" | "8k" | "8k_nordic" | "
 | 8k | 181 (0xB5) version/lighting, 179 (0xB3) fun-keys | 20 / 63 B | none |
 | Bridge (own DFU) | 178 (0xB2) | 32 B | 0xAA framing (see §6.2) |
 | Bridge (keyboard passthrough) | 0 | — | same as keyboard (forwarded) |
+
+**Empirically verified (Link-KM dongle 0x3434:D026, M6 1k mouse):** the dongle's mouse interface (hidraw, usage page 0x8C reports) has NO report 81 and no feature reports — all mouse traffic goes through OUT report 181 / IN report 182 (20-byte). Requests: cmd 2 (version: link vid/pid, mouse fw version `r[8].(r[7]>>4&15).(r[7]&15)`, workMode = `r[9] & 7`, feature flags r[11..16]); cmd 3 (receiver state: three fixed 5-byte slots `[vidLo, vidHi, pidLo, pidHi, state]` at offsets 2/7/12 — identifies the paired mouse's vpid; state 1 = connected).
 
 Bridge async notifications: after `sendReport(0, [0xBC, 0, ...])`, events arrive as `[0xE2, connectState]` and `[0xBC, kb1, kb2, mouse]`.
 
