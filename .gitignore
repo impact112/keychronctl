@@ -2,3 +2,4 @@ target/
 launcher-sources/
 *.bin
 *.zip
+gui/target/

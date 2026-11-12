@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# Mock backend for keychron-launcher. Honors the keychronctl JSON contract
+# (docs/GUI-CONTRACT.md) with canned data; state persists in
+# /tmp/opencode/keychronctl-mock/ so set->get round-trips work.
+set -u
+
+STATE=/tmp/opencode/keychronctl-mock
+mkdir -p "$STATE"
+[ -f "$STATE/dpi" ]     || echo "400 800 1600 3200 5000" > "$STATE/dpi"
+[ -f "$STATE/dpi_level" ]   || echo 4 > "$STATE/dpi_level"
+[ -f "$STATE/pollrate" ]    || echo 1000 > "$STATE/pollrate"
+[ -f "$STATE/sleep" ]       || echo 10 > "$STATE/sleep"
+[ -f "$STATE/debounce" ]   || echo 4 > "$STATE/debounce"
+[ -f "$STATE/profile" ]    || echo "1 2" > "$STATE/profile"   # current count
+[ -f "$STATE/sensor" ]     || echo "1 1 0 1 0 0" > "$STATE/sensor" # lod wave line motion scroll_dir fps20k
+[ -f "$STATE/scroll" ]     || echo "0 0 0" > "$STATE/scroll"
+[ -f "$STATE/light" ]      || echo "1 50 50 255 255 255" > "$STATE/light"
+[ -f "$STATE/binds" ]      || printf '8 media:volumeUp\n9 keyboard:ctrl+z\n' > "$STATE/binds"
+
+json() { printf '%s' "$1"; }
+err() { printf 'error: %s\n' "$1" >&2; }
+
+# Parse args after --json
+ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --json) ;;
+        -d) shift ;;   # selector value: ignore
+        *) ARGS+=("$1") ;;
+    esac
+    shift
+done
+cmd="${ARGS[0]:-}"
+sub="${ARGS[1]:-}"
+
+case "$cmd" in
+    list)
+        json '[{"vpid":875876390,"vid":13364,"pid":53286,"role":"mouse-8k","usage_page":65473,"usage":1,"path":"/dev/hidrawMOCK","product":"Keychron M6 (mock)"},{"vpid":875876390,"vid":13364,"pid":53286,"role":"keyboard","usage_page":65376,"usage":97,"path":"/dev/hidrawMOCK2","product":"Keychron M6 (mock)"}]'
+        ;;
+    info)
+        json '{"vpid":875876390,"vid:pid":"3434:D026","role":"mouse-8k","path":"/dev/hidrawMOCK","product":"Keychron M6 (mock)","protocol":"8k","version":"1.0.3","work_mode":"wireless (BT/2.4G)","battery_percent":96,"charging":false,"product_vpid":875876452,"bonded":[{"slot":"slot3","state":1,"active":true,"vid":13364,"pid":53348,"vpid":875876452}]}'
+        ;;
+    battery)
+        json '{"protocol":"8k","battery_percent":96,"charging":false,"battery_state":"discharging"}'
+        ;;
+    dpi)
+        if [ "$sub" = "set" ]; then
+            levels=$(printf '%s\n' "${ARGS[@]}" | grep -A1 '^--levels$' | tail -1)
+            [ -n "$levels" ] && echo "$levels" | tr ',' ' ' > "$STATE/dpi"
+            lvl=$(printf '%s\n' "${ARGS[@]}" | grep -A1 '^--level$' | tail -1)
+            [ -n "$lvl" ] && echo "$lvl" > "$STATE/dpi_level"
+            json '{"ok":true}'
+        else
+            read -r l0 l1 l2 l3 l4 < "$STATE/dpi"
+            cur=$(cat "$STATE/dpi_level")
+            json "{\"protocol\":\"8k\",\"profile\":1,\"current_levels\":[$cur,$cur,$cur],\"level_num\":5,\"levels\":[$l0,$l1,$l2,$l3,$l4],\"level_val_max\":12000,\"level_val_step\":50}"
+        fi
+        ;;
+    pollrate)
+        if [ "$sub" = "set" ]; then
+            echo "${ARGS[2]:-1000}" > "$STATE/pollrate"
+            json '{"ok":true}'
+        else
+            hz=$(cat "$STATE/pollrate")
+            case "$hz" in
+                125) lvl=0 ;; 500) lvl=1 ;; 1000) lvl=2 ;; 2000) lvl=3 ;; 4000) lvl=4 ;; 8000) lvl=5 ;; *) lvl=2 ;;
+            esac
+            json "{\"currentLevel\":[$lvl,$lvl,0],\"hz\":$hz,\"levels\":[0,1,2,0,0,0],\"levelsHz\":[125,500,1000,125,125,125],\"levelNum\":3}"
+        fi
+        ;;
+    sleep)
+        if [ "$sub" = "set" ]; then
+            echo "${ARGS[2]:-10}" > "$STATE/sleep"
+            json '{"ok":true}'
+        else
+            m=$(cat "$STATE/sleep")
+            json "{\"minutes\":$m,\"never\":false}"
+        fi
+        ;;
+    debounce)
+        if [ "$sub" = "set" ]; then
+            echo "${ARGS[2]:-4}" > "$STATE/debounce"
+            json '{"ok":true}'
+        else
+            ms=$(cat "$STATE/debounce")
+            json "{\"ms\":$ms,\"options\":[4,4,4,4,4,4,4,4,4,4]}"
+        fi
+        ;;
+    sensor)
+        if [ "$sub" = "set" ]; then
+            lod=1; wave=$(grep -c '\-\-wave on' <<<"${ARGS[*]}"); line=$(grep -c '\-\-line on' <<<"${ARGS[*]}")
+            motion=$(grep -c '\-\-motion on' <<<"${ARGS[*]}"); sdir=$(grep -c '\-\-scroll-dir reverse' <<<"${ARGS[*]}")
+            fps=$(grep -c '\-\-fps20k on' <<<"${ARGS[*]}")
+            echo "$lod $wave $line $motion $sdir $fps" > "$STATE/sensor"
+            json '{"ok":true}'
+        else
+            read -r lod wave line motion sdir fps < "$STATE/sensor"
+            json "{\"lod\":$lod,\"wave\":$wave,\"line\":$line,\"motion\":$motion,\"scroll_dir\":$sdir,\"fps20k\":$fps,\"angle\":0,\"lod_level\":0,\"lod_count\":0}"
+        fi
+        ;;
+    scroll)
+        if [ "$sub" = "set" ]; then
+            echo "${ARGS[2]:-0} 0 0" > "$STATE/scroll"
+            json '{"ok":true}'
+        else
+            read -r s i p < "$STATE/scroll"
+            json "{\"speed\":$s,\"inertia\":$i,\"spl\":$p}"
+        fi
+        ;;
+    settings)
+        read -r l0 l1 l2 l3 l4 < "$STATE/dpi"
+        cur=$(cat "$STATE/dpi_level")
+        ms=$(cat "$STATE/debounce"); sl=$(cat "$STATE/sleep")
+        read -r lod wave line motion sdir fps < "$STATE/sensor"
+        read -r sc_speed sc_i sc_p < "$STATE/scroll"
+        json "{\"protocol\":\"8k\",\"profile\":1,\"profile_count\":2,\"dpi_levels\":[$cur,$cur,$cur],\"dpi_values\":[$l0,$l1,$l2,$l3,$l4],\"dpi_level_num\":5,\"rate_levels\":[2,2,0],\"rate_table\":[0,1,2,0,0,0],\"rate_level_num\":3,\"sys\":{\"lod\":$lod,\"wave\":$wave,\"line\":$line,\"motion\":$motion,\"scroll_dir\":$sdir,\"fps20k\":$fps,\"angle\":0,\"lod_level\":0,\"lod_count\":0},\"debounce\":$ms,\"debounce_options\":[4,4,4,4,4,4,4,4,4,4],\"sleep_minutes\":$sl,\"battery_percent\":96,\"charging\":false,\"scroll\":{\"speed\":$sc_speed,\"inertia\":$sc_i,\"spl\":$sc_p},\"feature1\":55,\"color_materials\":[0,0,0]}"
+        ;;
+    lighting)
+        if [ "$sub" = "set" ]; then
+            mode="${ARGS[2]:-1}"
+            b=$(printf '%s\n' "${ARGS[@]}" | grep -A1 '^--brightness$' | tail -1); b=${b:-50}
+            s=$(printf '%s\n' "${ARGS[@]}" | grep -A1 '^--speed$' | tail -1); s=${s:-50}
+            rgb=$(printf '%s\n' "${ARGS[@]}" | grep -A1 '^--rgb$' | tail -1); rgb=${rgb:-255,255,255}
+            echo "$mode $b $s $(echo "$rgb" | tr ',' ' ')" > "$STATE/light"
+            read -r m br sp r g bl < "$STATE/light"
+            json "{\"protocol\":\"8k\",\"mode\":$m,\"brightness\":$br,\"speed\":$sp,\"rgb\":[$r,$g,$bl]}"
+        else
+            read -r m br sp r g bl < "$STATE/light"
+            json "{\"protocol\":\"8k\",\"mode\":$m,\"brightness\":$br,\"speed\":$sp,\"rgb\":[$r,$g,$bl]}"
+        fi
+        ;;
+    profile)
+        read -r cur cnt < "$STATE/profile"
+        case "$sub" in
+            list) json "{\"current\":$cur,\"count\":$cnt}" ;;
+            select)
+                idx="${ARGS[2]:-0}"
+                if [ "$idx" -ge "$cnt" ]; then err "profile $idx does not exist (device has $cnt)"; exit 5; fi
+                echo "$idx $cnt" > "$STATE/profile"
+                json '{"ok":true}' ;;
+            create)
+                [ "$cnt" -ge 5 ] && { err "profile limit reached ($cnt)"; exit 5; }
+                echo "$cur $((cnt+1))" > "$STATE/profile"
+                json '{"ok":true}' ;;
+            remove)
+                [ "$cnt" -le 1 ] && { err "cannot remove the last profile"; exit 5; }
+                nc=$((cnt-1)); [ "$cur" -ge "$nc" ] && cur=0
+                echo "$cur $nc" > "$STATE/profile"
+                json '{"ok":true}' ;;
+            *) err "unknown profile subcommand '$sub'"; exit 2 ;;
+        esac
+        ;;
+    binds)
+        if [ "$sub" = "set" ]; then
+            idx="${ARGS[2]:-0}"; action="${ARGS[3]:-remove}"
+            grep -v "^$idx " "$STATE/binds" > "$STATE/binds.tmp" || true
+            echo "$idx $action" >> "$STATE/binds.tmp"
+            mv "$STATE/binds.tmp" "$STATE/binds"
+            json '{"ok":true}'
+        else
+            read -r cur cnt < "$STATE/profile"
+            # entries: {"index":N,"key":"btnN","action":"type","value":"detail"}
+            entries=$(awk '{
+                split($2, kv, ":");
+                action = kv[1]; value = "";
+                if (length(kv) > 1) { value = kv[2]; for (i=3; i<=length(kv); i++) value = value ":" kv[i]; }
+                gsub(/"/, "", value);
+                printf "{\"index\":%d,\"key\":\"btn%d\",\"action\":\"%s\",\"value\":\"%s\"},", $1, $1, action, value;
+            }' "$STATE/binds" | sed 's/,$//')
+            profiles=""
+            for ((p=0; p<cnt; p++)); do
+                profiles="${profiles}{\"profile\":$p,\"bindings\":[${entries}]},"
+            done
+            profiles="${profiles%,}"
+            json "{\"vpid\":875876452,\"product\":\"Keychron M6 (mock)\",\"current_profile\":$cur,\"profile_count\":$cnt,\"profiles\":[$profiles]}"
+        fi
+        ;;
+    definitions)
+        json '[{"vpid":875876452,"name":"Keychron M6 (mock)"}]'
+        ;;
+    *)
+        err "unknown command: $cmd"; exit 2 ;;
+esac
+echo

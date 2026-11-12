@@ -1,0 +1,20 @@
+[package]
+name = "keychron-launcher"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Desktop GUI for Keychron devices (drives any CLI honoring the keychronctl JSON contract)"
+
+[dependencies]
+cxx = "1"
+cxx-qt = "0.10"
+cxx-qt-lib = { version = "0.10", features = ["qt_gui", "qt_qml"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+cxx-qt-build = { version = "0.10" }
+
+[profile.release]
+strip = true
+lto = true
