@@ -14,6 +14,8 @@
 //! - cmd 3: receiver state — three fixed 5-byte slots (kb1, kb2, mouse) with
 //!   [vidLo, vidHi, pidLo, pidHi, state]; state==1 = connected. Identifies the
 //!   paired mouse's vpid.
+//! - cmd 6 on reportId 179 (63-byte "fun-keys" buffer): full settings
+//!   snapshot — battery, DPI, polling rate, profile, sleep, debounce.
 
 use crate::transceiver::{ProtocolError, Transceiver};
 use hidapi::HidDevice;
@@ -21,8 +23,10 @@ use serde::Serialize;
 
 pub const REPORT_1K: u8 = 81;
 pub const REPORT_8K_VERSION: u8 = 181;
-#[allow(dead_code)] // fun-keys path, wired when macro/keymap support lands
+/// 8k "fun-keys" report (63-byte buffers); also carries the cmd-6 settings
+/// snapshot (battery/DPI/polling).
 pub const REPORT_8K_FUNKEYS: u8 = 179;
+pub const FUNKEYS_BUF: usize = 63;
 #[allow(dead_code)] // 4k/8k_nordic path, used when a 0xFF0A dongle is attached
 pub const NORDIC_BUF: usize = 64;
 pub const SMALL_BUF: usize = 20;
@@ -143,6 +147,110 @@ pub fn query_8k_bond_list(dev: HidDevice, verbose: bool) -> Result<Vec<BondedDev
         });
     }
     Ok(out)
+}
+
+/// Battery readout from the 8k cmd-6 settings snapshot.
+#[derive(Debug, Serialize)]
+pub struct PowerInfo {
+    pub protocol: &'static str,
+    /// Battery charge, percent (low 7 bits of response byte 19).
+    pub battery_percent: u8,
+    /// Charging flag (bit 7 of response byte 19).
+    pub charging: bool,
+    /// "charging" / "discharging"
+    pub battery_state: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub raw: Vec<String>,
+}
+
+/// DPI configuration from the 8k cmd-6 settings snapshot.
+#[derive(Debug, Serialize)]
+pub struct DpiInfo {
+    pub protocol: &'static str,
+    /// Current profile index the reported levels belong to (byte 1).
+    pub profile: u8,
+    /// Current DPI level per work mode: low nibbles of bytes 2..4.
+    pub current_levels: [u8; 3],
+    /// Number of DPI levels (byte 16).
+    pub level_num: u8,
+    /// DPI value of each level: five u16 LE pairs at bytes 5..14.
+    pub levels: [u16; 5],
+    /// Maximum settable DPI (u16 LE at bytes 40..41), when reported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level_val_max: Option<u16>,
+    /// DPI step (byte 42); the launcher defaults it to 50 when zero.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level_val_step: Option<u16>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub raw: Vec<String>,
+}
+
+/// 8K settings snapshot: cmd 6 on reportId 179 with 63-byte buffers
+/// (launcher class `W`, the default/"8k" branch of `Pe.get`). Unlike the
+/// 20-byte report-181 commands, one response carries the whole settings
+/// page. Offsets (payload after the IN report-ID byte):
+/// r[1] current profile, r[50] profile count,
+/// r[2..4] one byte per work mode: low nibble = current DPI level,
+///   high nibble = current polling-rate level,
+/// r[5..14] five DPI values (u16 LE), r[16] DPI level count,
+/// r[40..41] DPI max (u16 LE), r[42] DPI step (launcher: `|| 50`),
+/// r[43..48] polling-rate table, r[49] polling level count (launcher: `|| 6`),
+/// r[15] sys-feature bits, r[17] debounce, r[18] sleep minutes,
+/// r[19] battery: percent = 127 & r[19], charging = r[19] >> 7 & 1,
+/// r[57..59] shell / middle-wheel / side-wheel colors,
+/// r[26] / r[53] / r[60] feature flags (fw < 6; fw >= 6 reports them in
+///   the cmd-2 version response instead).
+fn query_8k_settings(dev: HidDevice, verbose: bool) -> Result<Vec<u8>, ProtocolError> {
+    let mut t = Transceiver::new(dev, REPORT_8K_FUNKEYS, FUNKEYS_BUF);
+    t.verbose = verbose;
+    let resp = t.request(&[6], 6)?;
+    if resp.len() < 43 {
+        return Err(ProtocolError {
+            message: format!("short 8k settings response: {} bytes", resp.len()),
+        });
+    }
+    Ok(resp)
+}
+
+/// 8K battery readout: cmd 6 on reportId 179, battery percent = 127 & r[19],
+/// charging = r[19] >> 7 & 1. The dongle forwards the query to the paired
+/// wireless mouse.
+#[allow(dead_code)] // wired into the `mouse info` output by the integrator
+pub fn query_8k_power(dev: HidDevice, verbose: bool) -> Result<PowerInfo, ProtocolError> {
+    let resp = query_8k_settings(dev, verbose)?;
+    let charging = (resp[19] >> 7) & 1 == 1;
+    Ok(PowerInfo {
+        protocol: "8k",
+        battery_percent: 127 & resp[19],
+        charging,
+        battery_state: if charging { "charging" } else { "discharging" },
+        raw: vec![crate::transceiver::hex(&resp)],
+    })
+}
+
+/// 8K DPI readout: cmd 6 on reportId 179, current level per work mode
+/// (low nibbles of r[2..4]) and the per-level DPI values of the active
+/// profile (five u16 LE at r[5..14], count r[16]).
+#[allow(dead_code)] // wired into the `mouse info` output by the integrator
+pub fn query_8k_dpi(dev: HidDevice, verbose: bool) -> Result<DpiInfo, ProtocolError> {
+    let resp = query_8k_settings(dev, verbose)?;
+    let max = (resp[41] as u16) << 8 | resp[40] as u16;
+    Ok(DpiInfo {
+        protocol: "8k",
+        profile: resp[1],
+        current_levels: [resp[2] & 0x0F, resp[3] & 0x0F, resp[4] & 0x0F],
+        level_num: resp[16],
+        levels: [
+            (resp[6] as u16) << 8 | resp[5] as u16,
+            (resp[8] as u16) << 8 | resp[7] as u16,
+            (resp[10] as u16) << 8 | resp[9] as u16,
+            (resp[12] as u16) << 8 | resp[11] as u16,
+            (resp[14] as u16) << 8 | resp[13] as u16,
+        ],
+        level_val_max: if max == 0 { None } else { Some(max) },
+        level_val_step: if resp[42] == 0 { None } else { Some(resp[42] as u16) },
+        raw: vec![crate::transceiver::hex(&resp)],
+    })
 }
 
 /// 4k / 8k_nordic version query: `[0, 0, 0x81, 0, workMode<<6, ...]` on
