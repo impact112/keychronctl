@@ -1,0 +1,72 @@
+# Launcher → keychronctl Feature Parity
+
+Tracks feature parity between the Keychron Launcher web app (reference:
+`docs/PROTOCOL.md`) and `keychronctl`. Firmware flashing is a **wontdo**.
+
+Legend: ✅ done · 🔄 in progress · ⬜ todo · 🚫 wontdo
+
+## Core / device management
+
+| Feature | Status | Notes |
+|---|---|---|
+| List connected interfaces (WebHID signatures) | ✅ | hid.rs, verified on Link-KM dongle |
+| Device selector (`-d vpid / VID:PID / path`) | ✅ | |
+| `info` — mouse link version + paired device | ✅ | 8k protocol: cmd 2 + cmd 3 on reportId 181 |
+| `info` — keyboard protocol/firmware | ✅ | implemented; untested (no keyboard paired) |
+| JSON output (`--json`) | ✅ | |
+| Protocol trace (`-v`) | ✅ | hex dump in/out, unmatched-report logging |
+| Exit codes per docs/CLI.md | ✅ | 0/1/3/4 exercised |
+| Definitions fetch/cache (`definitions fetch/list/show`) | 🔄 | module in progress |
+| Offline mode (`--offline`, `--no-cache`, `--cache-dir`) | ⬜ | |
+| Product catalog lookup (name for vpid) | ⬜ | via vapi product info |
+
+## Mouse (M6 via Link-KM dongle — 8k wire protocol, reportId 181/182)
+
+| Feature | Status | Notes |
+|---|---|---|
+| Link version info | ✅ | cmd 2: fw 1.0.3, work mode, feature flags |
+| Receiver state / bond list | ✅ | cmd 3: 3 fixed slots, identifies paired mouse |
+| Battery readout | 🔄 | 8k power query being traced in bundles |
+| DPI levels get | 🔄 | response layout being traced |
+| DPI levels set | ⬜ | |
+| Polling rate get/set | ⬜ | launcher: 8k cmd on reportId 181 |
+| Lighting get/set/save | ⬜ | cmds 32/36 (8k) |
+| Fun keys (button remap) | ⬜ | reportId 179, cmd 48/49/50 |
+| Profiles get/select | ⬜ | |
+| Debounce get/set | ⬜ | |
+| Sleep get/set | ⬜ | |
+
+## Keyboard (QMK raw HID — reportId 0, 32-byte)
+
+| Feature | Status | Notes |
+|---|---|---|
+| Protocol version (0x01) / KC version (0xA0) / fw (0xA1) | ✅ | implemented; untested |
+| Feature flags (0xA2) | ⬜ | gates per-command availability |
+| Layer count (0x11) / current layer (0xA3) | ⬜ | |
+| Keymap dump (0x12, 14-key chunks) | 🔄 | module in progress |
+| Keymap get/set (0x04/0x05) | 🔄 | module in progress |
+| Keymap clear (0x06) | ⬜ | |
+| Knob/encoder get/set (0x14/0x15) | ⬜ | |
+| Macro list/dump/set/reset (0x0C–0x10) | 🔄 | V9/V11 encodings |
+| Macro repeat (0xA7 sub 27/28) | ⬜ | |
+| Lighting get/set/save (0x07/0x08/0x09) | 🔄 | v3 param IDs (protocol ≥ 11) |
+| Per-key RGB (0xA8) | ⬜ | |
+| HE: travel/RT/DKS/calibrate (0xA9) | ⬜ | |
+| Sleep (0xA7 sub 11/12) | ⬜ | |
+| Debounce (0xA7 sub 5/6) | ⬜ | |
+| Poll rate (0xA7 sub 13/14) | ⬜ | |
+| Battery (0xA7 sub 49) | ⬜ | |
+| Reset keymap/EEPROM (0x06/0x0A) | ⬜ | destructive; needs `--yes` |
+
+## Firmware
+
+| Feature | Status | Notes |
+|---|---|---|
+| All bootloader flashing (STM32/WB/XJ/XJ_NEW/NXP/Nations/PCA) | 🚫 | wontdo (documented in spec §6) |
+| BT module DFU / Realtek CFU | 🚪 | 🚫 wontdo |
+
+## Test hardware available
+
+- **Keychron M6 (1k, vpid 875876452)** via **Link-KM dongle (0x3434:D026)** —
+  mouse interface `/dev/hidraw3` (reports 181/182), keyboard interface
+  `/dev/hidraw5` (idle — no keyboard paired).
