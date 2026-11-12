@@ -28,16 +28,18 @@ Legend: ✅ done · 🔄 in progress · ⬜ todo · 🚫 wontdo
 | Receiver state / bond list | ✅ | cmd 3: 3 fixed slots, identifies paired mouse |
 | Battery readout | ✅ | cmd 6 snapshot: 96 %, discharging (live) |
 | DPI levels get | ✅ | stock 400–5000 ladder, level 5 active (live) |
-| DPI levels set | ⬜ | |
+| DPI levels set | ✅ | cmd 64; level switch + value writes round-tripped (live) |
 | **Binds: list per profile** | ✅ | cmds 97/98; annotated with definition key names (live) |
 | **Binds: set** | ✅ | cmd 82, ack 0xE4; mouse/media/keyboard/dpi/pollingRate/profile/shortcut/light/remove/disable (live round-trip) |
 | **Profiles: list/select/create/remove** | ✅ | cmd 14 on reportId 181; count field creates/removes (live round-trip) |
-| Polling rate get/set | ⬜ | launcher: 8k cmd on reportId 181 |
-| Lighting get/set/save | ⬜ | cmds 32/36 (8k) |
-| Fun keys (button remap) | ⬜ | reportId 179, cmd 48/49/50 |
-| Profiles get/select | ⬜ | |
-| Debounce get/set | ⬜ | |
-| Sleep get/set | ⬜ | |
+| Polling rate get/set | ✅ | cmd 65; levels are indexes into [125,500,1000,2000,4000,8000,250]; live round-trip 500↔1000 Hz |
+| Sleep get/set | ✅ | cmds 10 get/set on reportId 181; live round-trip (restored 10 min) |
+| Debounce get/set | ✅ | cmd 67; live round-trip (restored 4 ms; M6 table is fixed 4 ms ×10) |
+| Sensor get/set (LOD/wave/line/motion/scrollDir/fps20k) | ✅ | cmd 66; live round-trip (--line on/off) |
+| Scroll wheel get/set | ✅ | cmd 69 `[69, speed, inertia, spl]`; live round-trip |
+| Settings snapshot dump (`settings`) | ✅ | full cmd-6 parse: profile/dpi/rate/sleep/debounce/battery/sensor/scroll |
+| Lighting get/set | ✅ | cmds 35/36 implemented per launcher; untestable on M6 (no RGB — device ignores cmd 35) |
+| 1k / 4k protocol paths (non-dongle mice) | ⬜ | only the 8k path is wired into the CLI |
 
 ## Keyboard (QMK raw HID — reportId 0, 32-byte)
 

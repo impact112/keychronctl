@@ -650,3 +650,298 @@ pub fn set_8k_profile(dev: HidDevice, profile: u8, count: u8, verbose: bool) -> 
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Full settings snapshot + write commands (8k protocol).
+// Snapshot: cmd 6 on reportId 179 (launcher class `W`). Writes: cmds 64 (DPI),
+// 65 (polling rate), 66 (sensor/sysfeatures), 67 (debounce), 69 (scroll
+// wheel), 36/35 (lighting), 10 (sleep) on reportId 181 with 20-byte buffers.
+// ---------------------------------------------------------------------------
+
+/// Global polling-rate table: level index → Hz (launcher UI DEFAULT_LEVELS).
+pub const POLLING_RATE_HZ: [u32; 7] = [125, 500, 1000, 2000, 4000, 8000, 250];
+
+pub fn polling_hz(level: u8) -> Option<u32> {
+    POLLING_RATE_HZ.get(level as usize).copied()
+}
+
+/// Sensor / system feature flags from the cmd-6 snapshot (byte 15).
+#[derive(Debug, Default, Serialize)]
+pub struct SysFeatures {
+    /// Lift-off distance (2 bits, byte 15).
+    pub lod: u8,
+    /// Ripple control (bit 2).
+    pub wave: bool,
+    /// Angle snapping / line (bit 3).
+    pub line: bool,
+    /// Motion sync (bit 4).
+    pub motion: bool,
+    /// Scroll direction: true = reversed (bit 6).
+    pub scroll_dir: bool,
+    /// 20K max-speed mode (bit 0 of byte 52).
+    pub fps20k: bool,
+    /// Angle tuning, signed (byte 55).
+    pub angle: i8,
+    /// LOD level (low nibble of byte 61) on devices with LOD levels.
+    pub lod_level: u8,
+    /// LOD level count (high nibble of byte 61).
+    pub lod_count: u8,
+}
+
+/// Scroll wheel settings from the cmd-6 snapshot (bytes 27..29).
+#[derive(Debug, Serialize)]
+pub struct ScrollInfo {
+    pub speed: u8,
+    pub inertia: u8,
+    pub spl: u8,
+}
+
+/// Everything the cmd-6 snapshot carries.
+#[derive(Debug, Serialize)]
+pub struct SettingsSnapshot {
+    pub protocol: &'static str,
+    /// Current profile index (r[1]).
+    pub profile: u8,
+    /// Profile count (r[50]).
+    pub profile_count: u8,
+    /// Current DPI level per work mode (low nibbles of r[2..4]).
+    pub dpi_levels: [u8; 3],
+    /// DPI values of the current profile (u16 LE at r[5..14]).
+    pub dpi_values: [u16; 5],
+    /// DPI level count (r[16]).
+    pub dpi_level_num: u8,
+    /// Current polling-rate level per work mode (high nibbles of r[2..4]).
+    pub rate_levels: [u8; 3],
+    /// Polling-rate table: level indexes (r[43..48], count r[49]).
+    pub rate_table: Vec<u8>,
+    /// Polling-rate level count (r[49]).
+    pub rate_level_num: u8,
+    /// Sensor / system features (r[15] etc.).
+    pub sys: SysFeatures,
+    /// Debounce, ms (r[17]); available options (r[30..40]).
+    pub debounce: u8,
+    pub debounce_options: Vec<u8>,
+    /// Sleep timer, minutes (r[18]); 255 = never.
+    pub sleep_minutes: u8,
+    /// Battery percent (127 & r[19]) and charging flag (bit 7).
+    pub battery_percent: u8,
+    pub charging: bool,
+    /// Scroll wheel (r[27..29]).
+    pub scroll: ScrollInfo,
+    /// Feature flags as reported by the firmware (r[26] on fw < 6).
+    pub feature1: u8,
+    /// Shell / middle-wheel / side-wheel color indexes (r[57..59]).
+    pub color_materials: [u8; 3],
+}
+
+/// Read and fully parse the 8k settings snapshot (cmd 6, reportId 179).
+pub fn query_8k_snapshot(dev: HidDevice, verbose: bool) -> Result<SettingsSnapshot, ProtocolError> {
+    let r = query_8k_settings(dev, verbose)?;
+    if r.len() < 62 {
+        return Err(ProtocolError {
+            message: format!("short 8k settings response: {} bytes", r.len()),
+        });
+    }
+    Ok(SettingsSnapshot {
+        protocol: "8k",
+        profile: r[1],
+        profile_count: r[50],
+        dpi_levels: [r[2] & 0x0F, r[3] & 0x0F, r[4] & 0x0F],
+        dpi_values: [
+            (r[6] as u16) << 8 | r[5] as u16,
+            (r[8] as u16) << 8 | r[7] as u16,
+            (r[10] as u16) << 8 | r[9] as u16,
+            (r[12] as u16) << 8 | r[11] as u16,
+            (r[14] as u16) << 8 | r[13] as u16,
+        ],
+        dpi_level_num: r[16],
+        rate_levels: [r[2] >> 4, r[3] >> 4, r[4] >> 4],
+        rate_table: r[43..49].to_vec(),
+        rate_level_num: if r[49] == 0 { 6 } else { r[49] },
+        sys: SysFeatures {
+            lod: 3 & r[15],
+            wave: (r[15] >> 2) & 1 == 1,
+            line: (r[15] >> 3) & 1 == 1,
+            motion: (r[15] >> 4) & 1 == 1,
+            scroll_dir: (r[15] >> 6) & 1 == 1,
+            fps20k: 1 & r[52] == 1,
+            angle: r[55] as i8,
+            lod_level: 15 & r[61],
+            lod_count: r[61] >> 4,
+        },
+        debounce: r[17],
+        debounce_options: r[30..40].to_vec(),
+        sleep_minutes: r[18],
+        battery_percent: 127 & r[19],
+        charging: (r[19] >> 7) & 1 == 1,
+        scroll: ScrollInfo { speed: r[27], inertia: r[28], spl: r[29] },
+        feature1: r[26],
+        color_materials: [r[57], r[58], r[59]],
+    })
+}
+
+/// Helper: run one 20-byte report-181 command, expecting the 0xE4 ack.
+fn ack_command(
+    dev: HidDevice,
+    payload: &[u8],
+    cmd: u8,
+    verbose: bool,
+) -> Result<Vec<u8>, ProtocolError> {
+    let mut t = Transceiver::new(dev, REPORT_8K_VERSION, SMALL_BUF);
+    t.verbose = verbose;
+    let resp = t.request(payload, 0xE4)?;
+    if resp.len() < 3 || resp[2] != cmd {
+        return Err(ProtocolError {
+            message: format!("cmd {cmd} ack mismatch: {}", crate::transceiver::hex(&resp)),
+        });
+    }
+    if resp[1] != 0 {
+        return Err(ProtocolError {
+            message: format!("cmd {cmd} rejected (status {})", resp[1]),
+        });
+    }
+    Ok(resp)
+}
+
+/// Set the DPI ladder (cmd 64, reportId 181): `[64, level, level, level,
+/// 5×u16-LE values, levelNum]` (launcher class `un.set`). The level byte is
+/// written three times (once per work mode).
+pub fn set_8k_dpi(
+    dev: HidDevice,
+    level: u8,
+    values: &[u16; 5],
+    level_num: u8,
+    verbose: bool,
+) -> Result<(), ProtocolError> {
+    let mut p = vec![64u8, level, level, level];
+    for v in values {
+        p.extend_from_slice(&v.to_le_bytes());
+    }
+    p.push(level_num);
+    ack_command(dev, &p, 64, verbose)?;
+    Ok(())
+}
+
+/// Set the polling rate (cmd 65, reportId 181): `[65, level, level,
+/// table bytes…, levelNum]` (launcher class `jt.set`). The table holds level
+/// indexes into `POLLING_RATE_HZ`, not Hz values.
+pub fn set_8k_polling_rate(
+    dev: HidDevice,
+    level: u8,
+    table: &[u8],
+    level_num: u8,
+    verbose: bool,
+) -> Result<(), ProtocolError> {
+    let mut p = vec![65u8, level, level];
+    p.extend_from_slice(table);
+    p.push(level_num);
+    ack_command(dev, &p, 65, verbose)?;
+    Ok(())
+}
+
+/// Sensor / system-feature write (cmd 66, reportId 181, launcher class
+/// `Ce.set`): `[66, lod, wave?, line?, motion?, 0, scrollDir+1, 0,
+/// fps20k+1, angleEnable?2:0, angle, lodLevel]`. The sensor bytes hold
+/// "off markers" (2) rather than plain booleans on some firmwares, matching
+/// the launcher's `|| 2` defaults.
+pub fn set_8k_sensor(
+    dev: HidDevice,
+    s: &SysFeatures,
+    verbose: bool,
+) -> Result<(), ProtocolError> {
+    let p = vec![
+        66u8,
+        s.lod,
+        if s.wave { 1 } else { 2 },
+        if s.line { 1 } else { 2 },
+        if s.motion { 1 } else { 2 },
+        0,
+        if s.scroll_dir { 2 } else { 1 },
+        0,
+        if s.fps20k { 2 } else { 1 },
+        if s.angle != 0 { 2 } else { 0 },
+        s.angle as u8,
+        s.lod_level,
+    ];
+    ack_command(dev, &p, 66, verbose)?;
+    Ok(())
+}
+
+/// Set the debounce time (cmd 67, reportId 181, launcher class `mn.set`):
+/// `[67, ms]`.
+pub fn set_8k_debounce(dev: HidDevice, ms: u8, verbose: bool) -> Result<(), ProtocolError> {
+    ack_command(dev, &[67, ms], 67, verbose)?;
+    Ok(())
+}
+
+/// Set the scroll-wheel parameters (cmd 69, reportId 181, launcher class
+/// `dr.set`): `[69, speed, inertia, spl]`.
+pub fn set_8k_scroll(dev: HidDevice, speed: u8, inertia: u8, spl: u8, verbose: bool) -> Result<(), ProtocolError> {
+    ack_command(dev, &[69, speed, inertia, spl], 69, verbose)?;
+    Ok(())
+}
+
+/// Sleep timer (cmd 10, reportId 181, launcher class `fr`): get sends
+/// `[10, 2]` and the response carries the minutes at byte 2; set sends
+/// `[10, 1, minutes]` where 0/255 mean "never sleep".
+pub fn get_8k_sleep(dev: HidDevice, verbose: bool) -> Result<u8, ProtocolError> {
+    let mut t = Transceiver::new(dev, REPORT_8K_VERSION, SMALL_BUF);
+    t.verbose = verbose;
+    let resp = t.request(&[10, 2], 10)?;
+    if resp.len() < 3 {
+        return Err(ProtocolError { message: "short sleep response".into() });
+    }
+    Ok(resp[2])
+}
+
+pub fn set_8k_sleep(dev: HidDevice, minutes: u8, verbose: bool) -> Result<(), ProtocolError> {
+    ack_command(dev, &[10, 1, if minutes == 0 { 255 } else { minutes }], 10, verbose)?;
+    Ok(())
+}
+
+/// Lighting state (8k protocol, launcher class `En`).
+#[derive(Debug, Serialize)]
+pub struct LightInfo {
+    pub protocol: &'static str,
+    /// Effect index (device-specific; 0 is usually "off"/static).
+    pub mode: u8,
+    pub brightness: u8,
+    pub speed: u8,
+    pub rgb: [u8; 3],
+}
+
+/// Read lighting (cmd 35 on reportId 181 → response cmd 33).
+pub fn query_8k_light(dev: HidDevice, verbose: bool) -> Result<LightInfo, ProtocolError> {
+    let mut t = Transceiver::new(dev, REPORT_8K_VERSION, SMALL_BUF);
+    t.verbose = verbose;
+    let resp = t.request(&[35], 33)?;
+    if resp.len() < 7 {
+        return Err(ProtocolError { message: "short lighting response".into() });
+    }
+    Ok(LightInfo {
+        protocol: "8k",
+        mode: resp[1],
+        brightness: resp[2],
+        speed: resp[3],
+        rgb: [resp[4], resp[5], resp[6]],
+    })
+}
+
+/// Write lighting (cmd 36 on reportId 181): `[36, mode, brightness, speed,
+/// r, g, b]`.
+pub fn set_8k_light(
+    dev: HidDevice,
+    mode: u8,
+    brightness: u8,
+    speed: u8,
+    rgb: [u8; 3],
+    verbose: bool,
+) -> Result<(), ProtocolError> {
+    let mut t = Transceiver::new(dev, REPORT_8K_VERSION, SMALL_BUF);
+    t.verbose = verbose;
+    let payload = [36, mode, brightness, speed, rgb[0], rgb[1], rgb[2]];
+    // The launcher does not wait for an ack on this write; mirror that and
+    // verify by reading back.
+    t.write(&payload)?;
+    Ok(())
+}

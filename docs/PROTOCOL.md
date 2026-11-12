@@ -200,6 +200,38 @@ Types (`EFunKey`): Remove=0, Mouse=1, Keyboard=2, Media=3, Macro=4, Dpi=5, Light
 
 **8k profiles — live-verified:** info comes from the cmd-6 settings snapshot (current = r[1], count = r[50]). Switch/create/remove is one command: `[14, profile, count]` on reportId 181, ack `[0xE4, 0, 14]`. Switching passes the current count; changing the count creates/removes profiles (launcher `switchProfileLevelNum`; if active ≥ new count it resets to 0). Profile-change async notifications arrive on IN report 229 (0xE5) with the new current index at byte 1.
 
+**8k settings snapshot — full field map (cmd 6, reportId 179, live-verified on M6):**
+
+| Bytes | Meaning |
+|---|---|
+| r[1] / r[50] | current profile / profile count |
+| r[2..4] | per work mode (3 modes): low nibble = current DPI level, high nibble = current polling-rate level |
+| r[5..14] | five DPI values, u16 LE |
+| r[16] | DPI level count |
+| r[40..41] / r[42] | DPI max (u16 LE) / step (launcher: `\|\| 50`) |
+| r[43..48] / r[49] | polling-rate table (level indexes) / level count (launcher: `\|\| 6`) |
+| r[15] | sys features: LOD = 3&r[15], wave=bit2, line=bit3, motion=bit4, scrollDir=bit6 |
+| r[17] / r[30..40] | debounce ms / debounce options table (M6 reports fixed 4 ms ×10) |
+| r[18] | sleep timer, minutes (255 = never) |
+| r[19] | battery: percent = 127&r[19], charging = bit7 |
+| r[27..29] | scroll wheel: speed / inertia / spl |
+| r[52] / r[55] / r[61] | fps20k (bit0) / signed angle tune / LOD level (low nibble) + count (high nibble) |
+| r[57..59] | shell / middle-wheel / side-wheel color indexes |
+
+**8k setting writes (reportId 181, 20-byte buffers) — live-verified on M6:**
+
+| Setting | Request | Notes |
+|---|---|---|
+| DPI ladder | `[64, level, level, level, 5×u16-LE values, levelNum]` | level written once per work mode |
+| Polling rate | `[65, level, level, table bytes…, levelNum]` | table holds **level indexes** into the global `[125, 500, 1000, 2000, 4000, 8000, 250]` Hz table, not Hz |
+| Sensor/sys features | `[66, lod, wave?1:2, line?1:2, motion?1:2, 0, scrollDir?2:1, 0, fps20k?2:1, angleEn?2:0, angle, lodLevel]` | "off" sensor bytes are 2, not 0 (launcher `\|\| 2` defaults) |
+| Debounce | `[67, ms]` | optional trailer `[17, workMode, ms]` (launcher `mn.set`) |
+| Scroll wheel | `[69, speed, inertia, spl]` | |
+| Sleep get/set | `[10, 2]` → time at r[2]; set `[10, 1, minutes\|\|255]` | UI range 1–240 min |
+| Lighting get/set | get `[35]` → resp cmd 33 `[33, mode, brightness, speed, r, g, b]`; set `[36, mode, brightness, speed, r, g, b]` | untestable on M6 (no RGB); device does not answer cmd 35 at all |
+
+All writes ack `[0xE4, status, cmd]`, status 0 = ok. **Status 4 rejections occur transiently after an RF reconnect** — a retry succeeds; treat status 4 with a retry (the CLI's retry loop handles the timeout case, not the status-4 case). Status 2 = mouse unreachable (RF link down).
+
 ---
 
 ## 4. Protocol version detection (connect sequence)

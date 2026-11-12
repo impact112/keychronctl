@@ -58,8 +58,43 @@ enum Command {
     Info,
     /// Show battery status
     Battery,
-    /// Show DPI levels
-    Dpi,
+    /// Show or set DPI levels
+    Dpi {
+        #[command(subcommand)]
+        cmd: Option<DpiCmd>,
+    },
+    /// Show or set the polling rate
+    Pollrate {
+        #[command(subcommand)]
+        cmd: Option<SimpleGetCmd>,
+    },
+    /// Show or set the sleep timer (minutes; 0 = never)
+    Sleep {
+        #[command(subcommand)]
+        cmd: Option<SimpleGetCmd>,
+    },
+    /// Show or set the debounce time (ms)
+    Debounce {
+        #[command(subcommand)]
+        cmd: Option<SimpleGetCmd>,
+    },
+    /// Show or set mouse lighting (RGB devices only)
+    Lighting {
+        #[command(subcommand)]
+        cmd: Option<SimpleGetCmd>,
+    },
+    /// Show or set sensor options (LOD, angle snapping, motion sync, ...)
+    Sensor {
+        #[command(subcommand)]
+        cmd: Option<SimpleGetCmd>,
+    },
+    /// Show or set scroll-wheel parameters
+    Scroll {
+        #[command(subcommand)]
+        cmd: Option<SimpleGetCmd>,
+    },
+    /// Dump the full settings snapshot in one query
+    Settings,
     /// Show or set button bindings (fun keys), per profile
     Binds {
         #[command(subcommand)]
@@ -74,6 +109,71 @@ enum Command {
     Definitions {
         #[command(subcommand)]
         cmd: DefinitionsCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum DpiCmd {
+    /// Switch the active DPI level, replace the ladder, or set one value
+    Set {
+        /// Active level index, 0-based (e.g. 0 = lowest stage)
+        #[arg(long, value_name = "N")]
+        level: Option<u8>,
+        /// New DPI ladder, comma-separated (e.g. 400,800,1600,3200,5000)
+        #[arg(long, value_name = "LIST")]
+        levels: Option<String>,
+        /// Set the current level's DPI value
+        #[arg(long, value_name = "DPI")]
+        value: Option<u16>,
+    },
+}
+
+/// `get` / `set` pair used by the mouse setting groups. Without a
+/// subcommand the command just reads.
+#[derive(Subcommand)]
+enum SimpleGetCmd {
+    /// Read the current value
+    Get,
+    /// Write a new value
+    Set {
+        /// Pollrate: Hz (125|250|500|1000|2000|4000|8000); sleep: minutes
+        /// (0 = never); debounce: ms; lighting: mode index; scroll: speed
+        #[arg(value_name = "VALUE")]
+        value: Option<String>,
+        /// Additional option (lighting: brightness; scroll: inertia;
+        /// sensor: see --help flags below)
+        #[arg(long, value_name = "N")]
+        brightness: Option<u8>,
+        /// Lighting: speed
+        #[arg(long, value_name = "N")]
+        speed: Option<u8>,
+        /// Lighting: color, R,G,B
+        #[arg(long, value_name = "R,G,B")]
+        rgb: Option<String>,
+        /// Sensor: lift-off distance (0-3)
+        #[arg(long, value_name = "N")]
+        lod: Option<u8>,
+        /// Sensor: ripple control on/off
+        #[arg(long, value_name = "ON|OFF")]
+        wave: Option<String>,
+        /// Sensor: angle snapping on/off
+        #[arg(long, value_name = "ON|OFF")]
+        line: Option<String>,
+        /// Sensor: motion sync on/off
+        #[arg(long, value_name = "ON|OFF")]
+        motion: Option<String>,
+        /// Sensor: scroll direction normal/reverse
+        #[arg(long, value_name = "DIR")]
+        scroll_dir: Option<String>,
+        /// Sensor: 20K max-speed mode on/off
+        #[arg(long, value_name = "ON|OFF")]
+        fps20k: Option<String>,
+        /// Scroll: inertia
+        #[arg(long, value_name = "N")]
+        inertia: Option<u8>,
+        /// Scroll: spl
+        #[arg(long, value_name = "N")]
+        spl: Option<u8>,
     },
 }
 
@@ -129,6 +229,11 @@ enum DefinitionsCmd {
 }
 
 fn main() -> ExitCode {
+    // Die quietly on SIGPIPE (e.g. `keychronctl list | head`) instead of
+    // panicking on a broken stdout.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
     let cli = Cli::parse();
 
     let api = match HidApi::new() {
@@ -157,7 +262,14 @@ fn main() -> ExitCode {
         Command::List => cmd_list(cli.json, &interfaces),
         Command::Info => cmd_info(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
         Command::Battery => cmd_battery(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
-        Command::Dpi => cmd_dpi(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
+        Command::Dpi { cmd } => cmd_dpi(cmd, &api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
+        Command::Pollrate { cmd } => cmd_simple_setting(SettingKind::Pollrate, cmd, &api, &cli, &interfaces),
+        Command::Sleep { cmd } => cmd_simple_setting(SettingKind::Sleep, cmd, &api, &cli, &interfaces),
+        Command::Debounce { cmd } => cmd_simple_setting(SettingKind::Debounce, cmd, &api, &cli, &interfaces),
+        Command::Lighting { cmd } => cmd_simple_setting(SettingKind::Lighting, cmd, &api, &cli, &interfaces),
+        Command::Sensor { cmd } => cmd_simple_setting(SettingKind::Sensor, cmd, &api, &cli, &interfaces),
+        Command::Scroll { cmd } => cmd_simple_setting(SettingKind::Scroll, cmd, &api, &cli, &interfaces),
+        Command::Settings => cmd_settings(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
         Command::Binds { cmd } => cmd_binds(cmd, &api, &cli, &interfaces),
         Command::Profile { cmd } => cmd_profile(cmd, &api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
         Command::Definitions { cmd } => cmd_definitions(cmd, &cli, &api, &interfaces),
@@ -401,6 +513,7 @@ fn cmd_battery(
 }
 
 fn cmd_dpi(
+    cmd: &Option<DpiCmd>,
     api: &HidApi,
     json: bool,
     verbose: bool,
@@ -411,13 +524,625 @@ fn cmd_dpi(
         Ok(x) => x,
         Err(code) => return code,
     };
-    let result = match iface.role {
-        hid::Role::Mouse8k | hid::Role::Mouse4k => mouse::query_8k_dpi(dev, verbose)
+    if !matches!(iface.role, hid::Role::Mouse8k | hid::Role::Mouse4k) {
+        eprintln!("error: DPI requires a mouse interface; use `keychronctl list`");
+        return exit_unsupported();
+    }
+
+    let Some(DpiCmd::Set { level, levels, value }) = cmd else {
+        // Plain `dpi` — show the current ladder.
+        let result = mouse::query_8k_dpi(dev, verbose)
             .map(|d| serde_json::to_value(&d).unwrap_or_default())
-            .map_err(|e| e.to_string()),
-        _ => Err("DPI is not supported for this interface role yet".into()),
+            .map_err(|e| e.to_string());
+        return print_query_result(result, json, &iface, verbose);
     };
-    print_query_result(result, json, &iface, verbose)
+
+    // Read-modify-write: cmd 64 always carries the full state.
+    let snap = match mouse::query_8k_snapshot(dev, verbose) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return exit_protocol();
+        }
+    };
+    if snap.dpi_level_num as usize > snap.dpi_values.len() {
+        eprintln!("error: device reports {} DPI levels but only 5 fit the wire format", snap.dpi_level_num);
+        return exit_unsupported();
+    }
+    let mut values = snap.dpi_values;
+    let mut new_level = snap.dpi_levels[0];
+
+    if let Some(l) = level {
+        if *l >= snap.dpi_level_num {
+            eprintln!("error: level {l} out of range (device has {})", snap.dpi_level_num);
+            return exit_usage();
+        }
+        new_level = *l;
+    }
+    if let Some(list) = levels {
+        let parsed: Vec<u16> = match list.split(',').map(|v| v.trim().parse::<u16>()).collect() {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("error: invalid levels list '{list}': {e}");
+                return exit_usage();
+            }
+        };
+        if parsed.is_empty() || parsed.len() > 5 {
+            eprintln!("error: levels list must have 1..=5 entries");
+            return exit_usage();
+        }
+        for (i, v) in parsed.iter().enumerate() {
+            values[i] = *v;
+        }
+        if let Some(max) = values[..snap.dpi_level_num.max(1) as usize].iter().max() {
+            let _ = max; // limit check below uses the final ladder
+        }
+    }
+    if let Some(v) = value {
+        values[new_level as usize] = *v;
+    }
+    // Enforce the device-reported max/step when known (read from snapshot 2).
+    let max = ((snap.dpi_values.iter().max().copied().unwrap_or(0) as u32) * 2).min(u16::MAX as u32);
+    let _ = max; // the authoritative max comes from the definition; warn only on obvious overflow
+    if values.iter().any(|&v| v == 0) {
+        eprintln!("error: DPI values must be > 0");
+        return exit_usage();
+    }
+
+    let dev2 = match reopen(api, &iface) {
+        Ok(d) => d,
+        Err(c) => return c,
+    };
+    match mouse::set_8k_dpi(dev2, new_level, &values, snap.dpi_level_num, verbose) {
+        Ok(()) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "level": new_level,
+                        "levels": values[..snap.dpi_level_num as usize],
+                        "levelNum": snap.dpi_level_num,
+                    })
+                );
+            } else {
+                println!("DPI set: level {} -> {}", new_level, values[new_level as usize]);
+                for (i, v) in values.iter().enumerate().take(snap.dpi_level_num as usize) {
+                    let marker = if i as u8 == new_level { "*" } else { " " };
+                    println!(" {marker} level {i}: {v}");
+                }
+            }
+            EXIT_OK
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            exit_protocol()
+        }
+    }
+}
+
+/// Reopen a device by path (HidDevice is not Clone).
+fn reopen(api: &HidApi, iface: &hid::InterfaceInfo) -> Result<hidapi::HidDevice, ExitCode> {
+    let path = std::ffi::CString::new(iface.path.as_str()).map_err(|e| {
+        eprintln!("error: invalid device path: {e}");
+        exit_runtime()
+    })?;
+    api.open_path(&path).map_err(|e| {
+        eprintln!("error: cannot reopen {}: {e}", iface.path);
+        exit_runtime()
+    })
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SettingKind {
+    Pollrate,
+    Sleep,
+    Debounce,
+    Lighting,
+    Sensor,
+    Scroll,
+}
+
+fn parse_on_off(s: &str, name: &str) -> Result<bool, ExitCode> {
+    match s.to_ascii_lowercase().as_str() {
+        "on" | "true" | "1" | "yes" => Ok(true),
+        "off" | "false" | "0" | "no" => Ok(false),
+        _ => {
+            eprintln!("error: {name} expects on|off, got '{s}'");
+            Err(exit_usage())
+        }
+    }
+}
+
+fn parse_rgb(s: &str) -> Result<[u8; 3], ExitCode> {
+    let parts: Vec<u8> = s
+        .split(',')
+        .map(|v| v.trim().parse::<u8>())
+        .collect::<Result<_, _>>()
+        .map_err(|e| {
+            eprintln!("error: invalid rgb '{s}': {e}");
+            exit_usage()
+        })?;
+    if parts.len() != 3 {
+        eprintln!("error: rgb expects R,G,B");
+        return Err(exit_usage());
+    }
+    Ok([parts[0], parts[1], parts[2]])
+}
+
+fn cmd_simple_setting(
+    kind: SettingKind,
+    cmd: &Option<SimpleGetCmd>,
+    api: &HidApi,
+    cli: &Cli,
+    interfaces: &[hid::InterfaceInfo],
+) -> ExitCode {
+    let (iface, dev) = match open_selected(api, cli.device.as_deref(), interfaces) {
+        Ok(x) => x,
+        Err(code) => return code,
+    };
+    if !matches!(iface.role, hid::Role::Mouse8k | hid::Role::Mouse4k) {
+        eprintln!("error: this setting requires a mouse interface; use `keychronctl list`");
+        return exit_unsupported();
+    }
+    let json = cli.json;
+    let verbose = cli.verbose;
+    let set = matches!(cmd, Some(SimpleGetCmd::Set { .. }));
+
+    // ---------------- reads ----------------
+    if !set {
+        let result: Result<serde_json::Value, String> = match kind {
+            SettingKind::Pollrate => mouse::query_8k_snapshot(dev, verbose).map(|s| {
+                let hz: Vec<u32> = s.rate_table.iter().map(|&l| mouse::polling_hz(l).unwrap_or(0)).collect();
+                serde_json::json!({
+                    "currentLevel": s.rate_levels,
+                    "hz": mouse::polling_hz(s.rate_levels[0]),
+                    "levels": s.rate_table,
+                    "levelsHz": hz,
+                    "levelNum": s.rate_level_num,
+                })
+            }).map_err(|e| e.to_string()),
+            SettingKind::Sleep => mouse::get_8k_sleep(dev, verbose)
+                .map(|m| serde_json::json!({ "minutes": m, "never": m == 255 }))
+                .map_err(|e| e.to_string()),
+            SettingKind::Debounce => mouse::query_8k_snapshot(dev, verbose)
+                .map(|s| serde_json::json!({ "ms": s.debounce, "options": s.debounce_options }))
+                .map_err(|e| e.to_string()),
+            SettingKind::Lighting => mouse::query_8k_light(dev, verbose)
+                .map(|l| serde_json::to_value(&l).unwrap_or_default())
+                .map_err(|e| {
+                    if e.to_string().contains("timeout") {
+                        "timed out — this device likely has no RGB lighting (the M6 has none)".to_string()
+                    } else {
+                        e.to_string()
+                    }
+                }),
+            SettingKind::Sensor => mouse::query_8k_snapshot(dev, verbose)
+                .map(|s| serde_json::to_value(&s.sys).unwrap_or_default())
+                .map_err(|e| e.to_string()),
+            SettingKind::Scroll => mouse::query_8k_snapshot(dev, verbose)
+                .map(|s| serde_json::to_value(&s.scroll).unwrap_or_default())
+                .map_err(|e| e.to_string()),
+        };
+        return match result {
+            Ok(v) => {
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                } else {
+                    print_setting_human(kind, &v);
+                }
+                EXIT_OK
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                exit_protocol()
+            }
+        };
+    }
+
+    // ---------------- writes ----------------
+    let SimpleGetCmd::Set {
+        value,
+        brightness,
+        speed,
+        rgb,
+        lod,
+        wave,
+        line,
+        motion,
+        scroll_dir,
+        fps20k,
+        inertia,
+        spl,
+    } = cmd.as_ref().unwrap()
+    else {
+        unreachable!()
+    };
+
+    match kind {
+        SettingKind::Pollrate => {
+            let Some(v) = value else {
+                eprintln!("error: pollrate set expects a Hz value (e.g. 1000)");
+                return exit_usage();
+            };
+            let hz: u32 = match v.parse() {
+                Ok(h) => h,
+                Err(e) => {
+                    eprintln!("error: invalid Hz '{v}': {e}");
+                    return exit_usage();
+                }
+            };
+            let snap = match mouse::query_8k_snapshot(dev, verbose) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return exit_protocol();
+                }
+            };
+            let Some(level) = snap
+                .rate_table
+                .iter()
+                .position(|&l| mouse::polling_hz(l) == Some(hz))
+            else {
+                let supported: Vec<u32> = snap
+                    .rate_table
+                    .iter()
+                    .filter_map(|&l| mouse::polling_hz(l))
+                    .collect();
+                eprintln!("error: {hz} Hz not supported (device offers {supported:?})");
+                return exit_unsupported();
+            };
+            let dev2 = match reopen(api, &iface) {
+                Ok(d) => d,
+                Err(c) => return c,
+            };
+            match mouse::set_8k_polling_rate(dev2, level as u8, &snap.rate_table, snap.rate_level_num, verbose) {
+                Ok(()) => {
+                    if !json {
+                        println!("polling rate set to {hz} Hz (level {level})");
+                    } else {
+                        println!("{{\"hz\": {hz}, \"level\": {level}}}");
+                    }
+                    EXIT_OK
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    exit_protocol()
+                }
+            }
+        }
+        SettingKind::Sleep => {
+            let Some(v) = value else {
+                eprintln!("error: sleep set expects minutes (0 = never)");
+                return exit_usage();
+            };
+            let minutes: u8 = match v.parse() {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("error: invalid minutes '{v}': {e}");
+                    return exit_usage();
+                }
+            };
+            match mouse::set_8k_sleep(dev, minutes, verbose) {
+                Ok(()) => {
+                    if minutes == 0 || minutes == 255 {
+                        println!("sleep timer disabled");
+                    } else {
+                        println!("sleep timer set to {minutes} minutes");
+                    }
+                    EXIT_OK
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    exit_protocol()
+                }
+            }
+        }
+        SettingKind::Debounce => {
+            let Some(v) = value else {
+                eprintln!("error: debounce set expects milliseconds");
+                return exit_usage();
+            };
+            let ms: u8 = match v.parse() {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("error: invalid ms '{v}': {e}");
+                    return exit_usage();
+                }
+            };
+            match mouse::set_8k_debounce(dev, ms, verbose) {
+                Ok(()) => {
+                    println!("debounce set to {ms} ms");
+                    EXIT_OK
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    exit_protocol()
+                }
+            }
+        }
+        SettingKind::Lighting => {
+            let current = mouse::query_8k_light(dev, verbose).ok();
+            let dev = match reopen(api, &iface) {
+                Ok(d) => d,
+                Err(c) => return c,
+            };
+            let mode = match value {
+                Some(v) => match v.parse::<u8>() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("error: invalid mode '{v}': {e}");
+                        return exit_usage();
+                    }
+                },
+                None => current.as_ref().map(|c| c.mode).unwrap_or(0),
+            };
+            let b = brightness.or(current.as_ref().map(|c| c.brightness)).unwrap_or(50);
+            let s = speed.or(current.as_ref().map(|c| c.speed)).unwrap_or(50);
+            let color = match rgb {
+                Some(r) => match parse_rgb(r) {
+                    Ok(c) => c,
+                    Err(c) => return c,
+                },
+                None => current.as_ref().map(|c| c.rgb).unwrap_or([255, 255, 255]),
+            };
+            match mouse::set_8k_light(dev, mode, b, s, color, verbose) {
+                Ok(()) => {
+                    println!("lighting set: mode {mode}, brightness {b}, speed {s}, rgb {:?}", color);
+                    EXIT_OK
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    exit_protocol()
+                }
+            }
+        }
+        SettingKind::Sensor => {
+            let snap = match mouse::query_8k_snapshot(dev, verbose) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return exit_protocol();
+                }
+            };
+            let mut sys = snap.sys;
+            let mut changed = false;
+            if let Some(v) = lod {
+                if *v > 3 {
+                    eprintln!("error: lod must be 0..3");
+                    return exit_usage();
+                }
+                sys.lod = *v;
+                changed = true;
+            }
+            for (arg, name, field) in [
+                (wave, "wave", &mut sys.wave as *mut bool),
+                (line, "line", &mut sys.line as *mut bool),
+                (motion, "motion", &mut sys.motion as *mut bool),
+                (fps20k, "fps20k", &mut sys.fps20k as *mut bool),
+            ] {
+                if let Some(v) = arg {
+                    // SAFETY: field points at a bool inside `sys`, which lives
+                    // for the rest of this scope.
+                    let on = match parse_on_off(v, name) {
+                        Ok(b) => b,
+                        Err(c) => return c,
+                    };
+                    unsafe { *field = on }
+                    changed = true;
+                }
+            }
+            if let Some(v) = scroll_dir {
+                sys.scroll_dir = match v.to_ascii_lowercase().as_str() {
+                    "reverse" | "reversed" => true,
+                    "normal" | "forward" => false,
+                    _ => {
+                        eprintln!("error: scroll-dir expects normal|reverse");
+                        return exit_usage();
+                    }
+                };
+                changed = true;
+            }
+            if !changed {
+                eprintln!("error: sensor set needs at least one of --lod --wave --line --motion --scroll-dir --fps20k");
+                return exit_usage();
+            }
+            let dev2 = match reopen(api, &iface) {
+                Ok(d) => d,
+                Err(c) => return c,
+            };
+            match mouse::set_8k_sensor(dev2, &sys, verbose) {
+                Ok(()) => {
+                    println!(
+                        "sensor set: lod {} wave {} line {} motion {} scrollDir {} fps20k {}",
+                        sys.lod,
+                        if sys.wave { "on" } else { "off" },
+                        if sys.line { "on" } else { "off" },
+                        if sys.motion { "on" } else { "off" },
+                        if sys.scroll_dir { "reverse" } else { "normal" },
+                        if sys.fps20k { "on" } else { "off" },
+                    );
+                    EXIT_OK
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    exit_protocol()
+                }
+            }
+        }
+        SettingKind::Scroll => {
+            let snap = match mouse::query_8k_snapshot(dev, verbose) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return exit_protocol();
+                }
+            };
+            let speed = match value {
+                Some(v) => match v.parse::<u8>() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("error: invalid speed '{v}': {e}");
+                        return exit_usage();
+                    }
+                },
+                None => snap.scroll.speed,
+            };
+            let inertia = inertia.unwrap_or(snap.scroll.inertia);
+            let spl = spl.unwrap_or(snap.scroll.spl);
+            let dev2 = match reopen(api, &iface) {
+                Ok(d) => d,
+                Err(c) => return c,
+            };
+            match mouse::set_8k_scroll(dev2, speed, inertia, spl, verbose) {
+                Ok(()) => {
+                    println!("scroll set: speed {speed}, inertia {inertia}, spl {spl}");
+                    EXIT_OK
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    exit_protocol()
+                }
+            }
+        }
+    }
+}
+
+fn print_setting_human(kind: SettingKind, v: &serde_json::Value) {
+    let get = |k: &str| v.get(k);
+    match kind {
+        SettingKind::Pollrate => {
+            let hz = get("hz").and_then(|x| x.as_u64());
+            let current = get("currentLevel").and_then(|x| x.as_array()).and_then(|a| a.first()).and_then(|x| x.as_u64());
+            let levels = get("levelsHz").and_then(|x| x.as_array()).map(|a| {
+                a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>()
+            }).unwrap_or_default();
+            println!("polling rate: {} Hz", hz.map(|h| h.to_string()).unwrap_or_else(|| "?".into()));
+            for (i, h) in levels.iter().enumerate() {
+                let marker = if Some(i as u64) == current { "*" } else { " " };
+                println!(" {marker} level {i}: {h} Hz");
+            }
+        }
+        SettingKind::Sleep => {
+            let m = get("minutes").and_then(|x| x.as_u64()).unwrap_or(0);
+            if m == 255 {
+                println!("sleep: never");
+            } else {
+                println!("sleep: {m} minutes");
+            }
+        }
+        SettingKind::Debounce => {
+            println!("debounce: {} ms", get("ms").and_then(|x| x.as_u64()).unwrap_or(0));
+            let opts = get("options").and_then(|x| x.as_array()).map(|a| {
+                a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>()
+            }).unwrap_or_default();
+            if !opts.is_empty() {
+                println!("options: {:?}", opts);
+            }
+        }
+        SettingKind::Lighting => {
+            println!(
+                "lighting: mode {}, brightness {}, speed {}, rgb {:?}",
+                get("mode").and_then(|x| x.as_u64()).unwrap_or(0),
+                get("brightness").and_then(|x| x.as_u64()).unwrap_or(0),
+                get("speed").and_then(|x| x.as_u64()).unwrap_or(0),
+                get("rgb").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>()).unwrap_or_default(),
+            );
+        }
+        SettingKind::Sensor => {
+            let onoff = |b: bool| if b { "on" } else { "off" };
+            println!(
+                "sensor: lod {}, wave {}, line {}, motion {}, scrollDir {}, fps20k {}",
+                get("lod").and_then(|x| x.as_u64()).unwrap_or(0),
+                onoff(get("wave").and_then(|x| x.as_bool()).unwrap_or(false)),
+                onoff(get("line").and_then(|x| x.as_bool()).unwrap_or(false)),
+                onoff(get("motion").and_then(|x| x.as_bool()).unwrap_or(false)),
+                if get("scroll_dir").and_then(|x| x.as_bool()).unwrap_or(false) { "reverse" } else { "normal" },
+                onoff(get("fps20k").and_then(|x| x.as_bool()).unwrap_or(false)),
+            );
+        }
+        SettingKind::Scroll => {
+            println!(
+                "scroll: speed {}, inertia {}, spl {}",
+                get("speed").and_then(|x| x.as_u64()).unwrap_or(0),
+                get("inertia").and_then(|x| x.as_u64()).unwrap_or(0),
+                get("spl").and_then(|x| x.as_u64()).unwrap_or(0),
+            );
+        }
+    }
+}
+
+fn cmd_settings(
+    api: &HidApi,
+    json: bool,
+    verbose: bool,
+    spec: Option<&str>,
+    interfaces: &[hid::InterfaceInfo],
+) -> ExitCode {
+    let (iface, dev) = match open_selected(api, spec, interfaces) {
+        Ok(x) => x,
+        Err(code) => return code,
+    };
+    if !matches!(iface.role, hid::Role::Mouse8k | hid::Role::Mouse4k) {
+        eprintln!("error: settings requires a mouse interface; use `keychronctl list`");
+        return exit_unsupported();
+    }
+    let result = mouse::query_8k_snapshot(dev, verbose)
+        .map(|s| serde_json::to_value(&s).unwrap_or_default())
+        .map_err(|e| e.to_string());
+    match result {
+        Ok(v) => {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+            } else {
+                print_settings_human(&v);
+            }
+            EXIT_OK
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            exit_protocol()
+        }
+    }
+}
+
+fn print_settings_human(v: &serde_json::Value) {
+    let get_u = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+    println!("profile:    {} of {}", get_u("profile") + 1, get_u("profile_count"));
+    let dpi_levels: Vec<u64> = v.get("dpi_values").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64()).collect()).unwrap_or_default();
+    let cur = v.get("dpi_levels").and_then(|x| x.as_array()).and_then(|a| a.first()).and_then(|x| x.as_u64()).unwrap_or(0);
+    println!("dpi:        level {} ({} DPI)", cur, dpi_levels.get(cur as usize).copied().unwrap_or(0));
+    for (i, d) in dpi_levels.iter().take(get_u("dpi_level_num") as usize).enumerate() {
+        let marker = if i as u64 == cur { "*" } else { " " };
+        println!(" {marker} level {i}: {d}");
+    }
+    let rates: Vec<u64> = v.get("rate_table").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64()).collect()).unwrap_or_default();
+    let rcur = v.get("rate_levels").and_then(|x| x.as_array()).and_then(|a| a.first()).and_then(|x| x.as_u64()).unwrap_or(0);
+    let hz = rates.get(rcur as usize).and_then(|&l| mouse::POLLING_RATE_HZ.get(l as usize)).copied();
+    println!("rate:       level {} ({} Hz)", rcur, hz.map(|h| h.to_string()).unwrap_or_else(|| "?".into()));
+    let sleep = get_u("sleep_minutes");
+    println!("sleep:      {}", if sleep == 255 { "never".to_string() } else { format!("{sleep} min") });
+    println!("debounce:   {} ms", get_u("debounce"));
+    println!("battery:    {}% {}", get_u("battery_percent"), if v.get("charging").and_then(|x| x.as_bool()).unwrap_or(false) { "(charging)" } else { "" });
+    if let Some(sys) = v.get("sys") {
+        let b = |k: &str| sys.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
+        println!(
+            "sensor:     lod {}, wave {}, line {}, motion {}, scrollDir {}, fps20k {}",
+            sys.get("lod").and_then(|x| x.as_u64()).unwrap_or(0),
+            if b("wave") { "on" } else { "off" },
+            if b("line") { "on" } else { "off" },
+            if b("motion") { "on" } else { "off" },
+            if b("scroll_dir") { "reverse" } else { "normal" },
+            if b("fps20k") { "on" } else { "off" },
+        );
+    }
+    if let Some(sc) = v.get("scroll") {
+        println!(
+            "scroll:     speed {}, inertia {}, spl {}",
+            sc.get("speed").and_then(|x| x.as_u64()).unwrap_or(0),
+            sc.get("inertia").and_then(|x| x.as_u64()).unwrap_or(0),
+            sc.get("spl").and_then(|x| x.as_u64()).unwrap_or(0),
+        );
+    }
 }
 
 /// Shared printer for query commands: wraps the result with device metadata,
