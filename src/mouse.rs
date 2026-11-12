@@ -304,3 +304,349 @@ pub fn query_1k_feature_base_info(dev: HidDevice, verbose: bool) -> Result<Mouse
         raw: Vec::new(),
     })
 }
+
+// ---------------------------------------------------------------------------
+// Fun keys (button bindings) — 8k protocol, reportId 179, 63-byte buffers.
+// Launcher module 98502: class `ee` (get-all cmd 97 / get cmd 98), class `W`
+// (set cmd 48, ack [0xE4, 0, 48]). Enums from module 75994.
+// ---------------------------------------------------------------------------
+
+/// Fun-key action types (launcher `EFunKey`).
+pub const FK_REMOVE: u8 = 0;
+pub const FK_MOUSE: u8 = 1;
+pub const FK_KEYBOARD: u8 = 2;
+pub const FK_MEDIA: u8 = 3;
+pub const FK_MACRO: u8 = 4;
+pub const FK_DPI: u8 = 5;
+pub const FK_LIGHT: u8 = 6;
+pub const FK_GAME: u8 = 7;
+pub const FK_SHORTCUT: u8 = 8;
+pub const FK_DISABLE: u8 = 9;
+pub const FK_PROFILE: u8 = 10;
+pub const FK_POLLING_RATE: u8 = 13;
+
+pub fn funkey_type_name(t: u8) -> &'static str {
+    match t {
+        FK_REMOVE => "remove",
+        FK_MOUSE => "mouse",
+        FK_KEYBOARD => "keyboard",
+        FK_MEDIA => "media",
+        FK_MACRO => "macro",
+        FK_DPI => "dpi",
+        FK_LIGHT => "light",
+        FK_GAME => "game",
+        FK_SHORTCUT => "shortcut",
+        FK_DISABLE => "disable",
+        FK_PROFILE => "profile",
+        FK_POLLING_RATE => "pollingRate",
+        _ => "unknown",
+    }
+}
+
+/// Basic mouse-button codes (launcher `EBasicKey`, 24-bit values).
+pub fn basic_key_name(v: u32) -> Option<&'static str> {
+    Some(match v {
+        0x010000 => "left",
+        0x020000 => "right",
+        0x040000 => "middle",
+        0x100000 => "forward",
+        0x080000 => "backward",
+        0x800000 => "leftDouble",
+        0x000200 => "upScroll",
+        0x00FE00 => "downScroll",
+        0x0000FE => "leftScroll",
+        0x000002 => "rightScroll",
+        0x4000FF => "leftScrollSustain",
+        0x400001 => "rightScrollSustain",
+        _ => return None,
+    })
+}
+
+/// Media key codes (launcher `EMediaKey`).
+pub fn media_key_name(v: u16) -> Option<&'static str> {
+    Some(match v {
+        233 => "volumeUp",
+        234 => "volumeDown",
+        226 => "mute",
+        387 => "player",
+        205 => "pause",
+        182 => "previous",
+        181 => "next",
+        183 => "stop",
+        _ => return None,
+    })
+}
+
+/// Loop-action codes (launcher `ELoopKey`) for DPI / polling-rate bindings.
+pub fn loop_key_name(v: u8) -> Option<&'static str> {
+    Some(match v {
+        1 => "loop",
+        2 => "next",
+        3 => "prev",
+        _ => return None,
+    })
+}
+
+/// Modifier bit values (launcher `EModifierKey`) for keyboard bindings.
+pub fn modifier_name(bit: u8) -> Option<&'static str> {
+    Some(match bit {
+        1 => "ctrl",
+        2 => "shift",
+        4 => "alt",
+        8 => "win",
+        16 => "ctrlR",
+        32 => "shiftR",
+        64 => "altR",
+        128 => "winR",
+        _ => return None,
+    })
+}
+
+/// Shortcut codes (launcher `EShortcutKey`, 24-bit values).
+pub fn shortcut_key_name(v: u32) -> Option<&'static str> {
+    Some(match v {
+        814848 => "brightnessUp",
+        815104 => "brightnessDown",
+        823809 => "calculate",
+        824321 => "myComputer",
+        795394 => "homePage",
+        821761 => "email",
+        458814 => "refresh",
+        459819 => "switchApp",
+        827138 => "task",
+        827394 => "launchPad",
+        460807 => "home",
+        461334 => "screenshot",
+        459014 => "copy",
+        459035 => "cut",
+        459033 => "paste",
+        461345 => "screenshotMac",
+        460806 => "copyMac",
+        460827 => "cutMac",
+        460825 => "pasteMac",
+        459053 => "webLessen",
+        459054 => "webMagnify",
+        460845 => "webLessenMac",
+        460846 => "webMagnifyMac",
+        _ => return None,
+    })
+}
+
+/// One button binding, decoded.
+#[derive(Debug, Serialize)]
+pub struct FunKeyBinding {
+    /// Button index (from the device definition's `keys[].index`).
+    pub index: u8,
+    /// Action type name (see `funkey_type_name`).
+    pub action: &'static str,
+    /// Decoded action detail, human-oriented (e.g. "left", "volumeUp", "loop").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// Raw data bytes after the type byte in the get response.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub data: Vec<u8>,
+}
+
+/// Get-all bound keys (cmd 97 on reportId 179). Returns the bound key indexes.
+/// Response: `[97, count, entries...]`; each entry is `2 + (entry[0] >> 5)`
+/// bytes long with the key index in the low 5 bits of its first byte.
+fn funkey_get_all_indexes(dev: HidDevice, verbose: bool) -> Result<Vec<u8>, ProtocolError> {
+    let mut t = Transceiver::new(dev, REPORT_8K_FUNKEYS, FUNKEYS_BUF);
+    t.verbose = verbose;
+    let resp = t.request(&[97], 97)?;
+    if resp.len() < 2 {
+        return Err(ProtocolError { message: "short funkey get-all response".into() });
+    }
+    let count = resp[1] as usize;
+    let mut rest = &resp[2..];
+    let mut out = Vec::new();
+    for _ in 0..count {
+        if rest.is_empty() {
+            break;
+        }
+        let len = 2 + (rest[0] >> 5) as usize;
+        let index = rest[0] & 0x1F;
+        out.push(index);
+        if rest.len() < len {
+            break;
+        }
+        rest = &rest[len..];
+    }
+    Ok(out)
+}
+
+/// Get one button binding (cmd 98 on reportId 179): `[98, keyIndex]` →
+/// `[98, keyIndex, ?, type, data...]`.
+pub fn query_8k_funkey(dev: HidDevice, index: u8, verbose: bool) -> Result<FunKeyBinding, ProtocolError> {
+    let mut t = Transceiver::new(dev, REPORT_8K_FUNKEYS, FUNKEYS_BUF);
+    t.verbose = verbose;
+    let resp = t.request(&[98, index], 98)?;
+    if resp.len() < 4 {
+        return Err(ProtocolError { message: format!("short funkey get response: {} bytes", resp.len()) });
+    }
+    let ftype = resp[3];
+    let data = resp[4..].to_vec();
+    Ok(FunKeyBinding {
+        index,
+        action: funkey_type_name(ftype),
+        value: decode_funkey_value(ftype, &data),
+        data,
+    })
+}
+
+/// HID keyboard usage ID → printable name (for keyboard-binding display).
+pub fn hid_key_name(code: u8) -> Option<&'static str> {
+    const LETTERS: [&str; 26] = ["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z"];
+    const DIGITS: [&str; 10] = ["1","2","3","4","5","6","7","8","9","0"];
+    Some(match code {
+        4..=29 => LETTERS[(code - 4) as usize],
+        30..=39 => DIGITS[(code - 30) as usize],
+        40 => "enter", 41 => "esc", 42 => "backspace", 43 => "tab", 44 => "space",
+        45 => "-", 46 => "=", 47 => "[", 48 => "]", 49 => "\\", 50 => ";", 51 => "'",
+        52 => "`", 53 => ",", 54 => ".", 55 => "/", 57 => "capslock",
+        58..=69 => return Some(match code {
+            58 => "f1", 59 => "f2", 60 => "f3", 61 => "f4", 62 => "f5", 63 => "f6",
+            64 => "f7", 65 => "f8", 66 => "f9", 67 => "f10", 68 => "f11", 69 => "f12",
+            _ => unreachable!(),
+        }),
+        _ => return None,
+    })
+}
+
+/// Decode the action detail per type (launcher `accountKey` semantics).
+fn decode_funkey_value(ftype: u8, data: &[u8]) -> Option<String> {
+    let u24 = |d: &[u8]| ((d[0] as u32) << 16) | ((d[1] as u32) << 8) | d[2] as u32;
+    match ftype {
+        FK_MOUSE if data.len() >= 3 => Some(
+            basic_key_name(u24(data)).map(|s| s.to_string()).unwrap_or_else(|| format!("0x{:06X}", u24(data))),
+        ),
+        FK_KEYBOARD if !data.is_empty() => {
+            let mut parts = Vec::new();
+            for bit in [1u8, 2, 4, 8, 16, 32, 64, 128] {
+                if data[0] & bit != 0 {
+                    parts.push(modifier_name(bit).unwrap_or("?").to_string());
+                }
+            }
+            for k in data.iter().skip(1) {
+                if *k != 0 {
+                    parts.push(hid_key_name(*k).map(|s| s.to_string()).unwrap_or_else(|| format!("KC_{k:02X}")));
+                }
+            }
+            Some(parts.join("+"))
+        }
+        FK_MEDIA if data.len() >= 2 => {
+            let v = (data[1] as u16) << 8 | data[0] as u16;
+            Some(media_key_name(v).map(|s| s.to_string()).unwrap_or_else(|| format!("{v}")))
+        }
+        FK_DPI | FK_POLLING_RATE if !data.is_empty() => {
+            Some(loop_key_name(data[0]).map(|s| s.to_string()).unwrap_or_else(|| format!("{}", data[0])))
+        }
+        FK_SHORTCUT if data.len() >= 3 => {
+            let v = u24(data);
+            Some(shortcut_key_name(v).map(|s| s.to_string()).unwrap_or_else(|| format!("0x{v:06X}")))
+        }
+        FK_PROFILE if !data.is_empty() => Some(format!("profile {}", data[0])),
+        FK_LIGHT if !data.is_empty() => Some(format!("{}", data[0])),
+        _ => None,
+    }
+}
+
+/// Set one button binding (cmd 82 on reportId 179, launcher class `be`):
+/// `[82, keyIndex, 0, type, data...]`, ack `[0xE4, 0, 82]`.
+/// (Cmd 48 is the bridge-module variant used for mice behind keyboard
+/// bridges; the mouse module uses 82.)
+pub fn set_8k_funkey(
+    dev: HidDevice,
+    index: u8,
+    ftype: u8,
+    data: &[u8],
+    verbose: bool,
+) -> Result<(), ProtocolError> {
+    let mut t = Transceiver::new(dev, REPORT_8K_FUNKEYS, FUNKEYS_BUF);
+    t.verbose = verbose;
+    let mut payload = vec![82u8, index, 0, ftype];
+    payload.extend_from_slice(data);
+    let resp = t.request(&payload, 0xE4)?;
+    // Ack echo: [0xE4, status, cmd]; status 0 = ok.
+    if resp.len() < 3 || resp[2] != 82 {
+        return Err(ProtocolError { message: "funkey set ack mismatch".into() });
+    }
+    if resp[1] != 0 {
+        return Err(ProtocolError { message: format!("funkey set rejected (status {})", resp[1]) });
+    }
+    Ok(())
+}
+
+/// All bindings for the current profile. Follows the launcher's `getAll`:
+/// bound-key indexes from the cmd-97 get-all, plus explicit gets for
+/// definition keys with index > 4 (the standard buttons 0..=4 are covered by
+/// the get-all index response). `open` yields a fresh HID handle per query.
+pub fn query_8k_funkeys<O>(
+    open: O,
+    definition_indexes: &[u8],
+    verbose: bool,
+) -> Result<Vec<FunKeyBinding>, ProtocolError>
+where
+    O: Fn() -> Result<HidDevice, ProtocolError>,
+{
+    let mut indexes: Vec<u8> = funkey_get_all_indexes(open()?, verbose)?;
+    for i in definition_indexes.iter().filter(|i| **i > 4) {
+        if !indexes.contains(i) {
+            indexes.push(*i);
+        }
+    }
+    indexes.sort_unstable();
+    indexes.dedup();
+
+    let mut out = Vec::new();
+    for index in indexes {
+        match query_8k_funkey(open()?, index, verbose) {
+            Ok(b) => out.push(b),
+            // Unbound keys may not answer; the launcher treats that as empty.
+            Err(_) => continue,
+        }
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Profiles — 8k protocol. Info from the cmd-6 settings snapshot
+// (current = r[1], count = r[50]); switch/create via cmd 14 on reportId 181:
+/// `[14, profile, count]`, ack `[0xE4, 0, 14]`. The count parameter defines
+/// how many profiles exist — switching passes the current count; creating a
+/// profile = increasing the count (launcher `switchProfileLevelNum`).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct ProfileInfo {
+    pub protocol: &'static str,
+    /// Currently active profile index.
+    pub current: u8,
+    /// Number of profiles that exist.
+    pub count: u8,
+}
+
+/// Profile info from the cmd-6 settings snapshot (r[1] current, r[50] count).
+pub fn query_8k_profile(dev: HidDevice, verbose: bool) -> Result<ProfileInfo, ProtocolError> {
+    let resp = query_8k_settings(dev, verbose)?;
+    if resp.len() <= 50 {
+        return Err(ProtocolError { message: "settings snapshot too short for profile info".into() });
+    }
+    Ok(ProfileInfo { protocol: "8k", current: resp[1], count: resp[50] })
+}
+
+/// Switch to `profile` (passing `count` = current profile count), or change
+/// the profile count (`profile` = an index < count, `count` = new count).
+/// Ack: `[0xE4, 0, 14]`.
+pub fn set_8k_profile(dev: HidDevice, profile: u8, count: u8, verbose: bool) -> Result<(), ProtocolError> {
+    let mut t = Transceiver::new(dev, REPORT_8K_VERSION, SMALL_BUF);
+    t.verbose = verbose;
+    let resp = t.request(&[14, profile, count], 0xE4)?;
+    if resp.len() < 3 || resp[2] != 14 {
+        return Err(ProtocolError { message: "profile set ack mismatch".into() });
+    }
+    if resp[1] != 0 {
+        return Err(ProtocolError { message: format!("profile set rejected (status {})", resp[1]) });
+    }
+    Ok(())
+}

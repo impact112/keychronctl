@@ -1,6 +1,8 @@
 mod definition;
 mod hid;
 mod keyboard;
+mod keymap;
+mod r#macro;
 mod mouse;
 mod transceiver;
 
@@ -11,6 +13,7 @@ use std::process::ExitCode;
 
 // Exit codes (docs/CLI.md); constructed at runtime since ExitCode::from is not const.
 fn exit_runtime() -> ExitCode { ExitCode::from(1) }
+fn exit_usage() -> ExitCode { ExitCode::from(2) }
 fn exit_no_device() -> ExitCode { ExitCode::from(3) }
 fn exit_protocol() -> ExitCode { ExitCode::from(4) }
 fn exit_unsupported() -> ExitCode { ExitCode::from(5) }
@@ -57,11 +60,55 @@ enum Command {
     Battery,
     /// Show DPI levels
     Dpi,
+    /// Show or set button bindings (fun keys), per profile
+    Binds {
+        #[command(subcommand)]
+        cmd: BindsCmd,
+    },
+    /// List, switch, create, or remove mouse profiles
+    Profile {
+        #[command(subcommand)]
+        cmd: ProfileCmd,
+    },
     /// Manage the device-definition cache
     Definitions {
         #[command(subcommand)]
         cmd: DefinitionsCmd,
     },
+}
+
+#[derive(Subcommand)]
+enum BindsCmd {
+    /// List bindings (all profiles, or one with --profile)
+    List {
+        /// Only fetch this profile (default: all)
+        #[arg(long, value_name = "N")]
+        profile: Option<u8>,
+    },
+    /// Set a button binding (applies to the current or --profile)
+    Set {
+        /// Button index (see `binds list` or the definition)
+        index: u8,
+        /// Action: mouse:left|right|middle|forward|backward|..., media:volumeUp,
+        /// keyboard:ctrl+a, dpi:loop|next|prev, pollingRate:loop, profile:N,
+        /// shortcut:copy|paste|..., light:N, remove, disable
+        action: String,
+        /// Target profile (default: current)
+        #[arg(long, value_name = "N")]
+        profile: Option<u8>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProfileCmd {
+    /// Show current profile and count
+    List,
+    /// Switch to a profile
+    Select { index: u8 },
+    /// Create a new profile (appends after the last)
+    Create,
+    /// Remove the last profile
+    Remove,
 }
 
 #[derive(Subcommand)]
@@ -111,6 +158,8 @@ fn main() -> ExitCode {
         Command::Info => cmd_info(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
         Command::Battery => cmd_battery(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
         Command::Dpi => cmd_dpi(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
+        Command::Binds { cmd } => cmd_binds(cmd, &api, &cli, &interfaces),
+        Command::Profile { cmd } => cmd_profile(cmd, &api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
         Command::Definitions { cmd } => cmd_definitions(cmd, &cli, &api, &interfaces),
     }
 }
@@ -407,6 +456,506 @@ fn load_opts(cli: &Cli) -> definition::LoadOpts {
         offline: cli.offline,
         no_cache: cli.no_cache,
         json_version: None,
+    }
+}
+
+/// Resolve the mouse device context: interface, HID opener, paired mouse
+/// vpid, and its definition (for key names/indexes).
+struct MouseCtx {
+    iface: hid::InterfaceInfo,
+    path: std::ffi::CString,
+    vpid: u32,
+    def: definition::Definition,
+}
+
+fn mouse_context(api: &HidApi, cli: &Cli, spec: Option<&str>, interfaces: &[hid::InterfaceInfo]) -> Result<MouseCtx, ExitCode> {
+    let iface = match select_interface(spec, interfaces) {
+        Ok(i) => i.clone(),
+        Err(code) => return Err(code),
+    };
+    if iface.role != hid::Role::Mouse8k && iface.role != hid::Role::Mouse4k {
+        eprintln!("error: selected device is not a mouse interface ({}); use `keychronctl list`", iface.role.as_str());
+        return Err(exit_unsupported());
+    }
+    let path = match std::ffi::CString::new(iface.path.as_str()) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: invalid device path: {e}");
+            return Err(exit_runtime());
+        }
+    };
+    // Paired mouse vpid from the bond list.
+    let vpid = match api.open_path(&path) {
+        Ok(dev) => match mouse::query_8k_bond_list(dev, false) {
+            Ok(bonded) => bonded.iter().find(|b| b.active).map(|b| b.vpid),
+            Err(_) => None,
+        },
+        Err(e) => {
+            eprintln!("error: cannot open {}: {e}", iface.path);
+            return Err(exit_runtime());
+        }
+    };
+    let Some(vpid) = vpid else {
+        eprintln!("error: no paired mouse found on the receiver");
+        return Err(exit_no_device());
+    };
+    let def = match definition::Definition::load(vpid, &load_opts(cli)) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: cannot load definition for vpid {vpid}: {e}");
+            eprintln!("hint: `keychronctl definitions fetch --vpid {vpid}`");
+            return Err(exit_runtime());
+        }
+    };
+    Ok(MouseCtx { iface, path, vpid, def })
+}
+
+fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::InterfaceInfo]) -> ExitCode {
+    let ctx = match mouse_context(api, cli, cli.device.as_deref(), interfaces) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let verbose = cli.verbose;
+    let json = cli.json;
+
+    match cmd {
+        BindsCmd::List { profile } => {
+            let (current, count) = match api.open_path(&ctx.path).ok().map(|d| mouse::query_8k_profile(d, verbose)) {
+                Some(Ok(p)) => (p.current, p.count),
+                _ => {
+                    eprintln!("error: cannot read profile info");
+                    return exit_protocol();
+                }
+            };
+            let profiles: Vec<u8> = match profile {
+                Some(p) => vec![*p],
+                None => (0..count).collect(),
+            };
+
+            let key_name = |index: u8| -> String {
+                match &ctx.def {
+                    definition::Definition::Mouse(m) => m
+                        .keys
+                        .iter()
+                        .find(|k| k.index == index)
+                        .and_then(|k| k.id.clone())
+                        .unwrap_or_default(),
+                    _ => String::new(),
+                }
+            };
+            let def_indexes: Vec<u8> = match &ctx.def {
+                definition::Definition::Mouse(m) => m.keys.iter().map(|k| k.index).collect(),
+                _ => vec![],
+            };
+
+            let mut out = serde_json::Map::new();
+            let mut binds_by_profile: Vec<serde_json::Value> = Vec::new();
+            for p in profiles {
+                if p >= count {
+                    eprintln!("error: profile {p} does not exist (device has {count})");
+                    return exit_unsupported();
+                }
+                if p != current {
+                    if let Err(e) = api.open_path(&ctx.path).map(|d| mouse::set_8k_profile(d, p, count, verbose)) {
+                        eprintln!("error: cannot switch to profile {p}: {e:?}");
+                        return exit_protocol();
+                    }
+                }
+                let bindings = collect_bindings(api, &ctx.path, &def_indexes, verbose);
+                if p != current {
+                    // Restore the previously active profile.
+                    let _ = api.open_path(&ctx.path).map(|d| mouse::set_8k_profile(d, current, count, verbose));
+                }
+                let annotated: Vec<serde_json::Value> = bindings
+                    .iter()
+                    .map(|b| {
+                        let mut o = serde_json::to_value(b).unwrap_or_default();
+                        if let serde_json::Value::Object(map) = &mut o {
+                            let name = key_name(b.index);
+                            if !name.is_empty() {
+                                map.insert("key".into(), name.into());
+                            }
+                        }
+                        o
+                    })
+                    .collect();
+                binds_by_profile.push(serde_json::json!({ "profile": p, "bindings": annotated }));
+            }
+            out.insert("vpid".into(), ctx.vpid.into());
+            out.insert("product".into(), ctx.def.name().into());
+            out.insert("current_profile".into(), current.into());
+            out.insert("profile_count".into(), count.into());
+            out.insert("profiles".into(), serde_json::Value::Array(binds_by_profile));
+            if json {
+                println!("{}", serde_json::to_string_pretty(&serde_json::Value::Object(out)).unwrap_or_default());
+            } else {
+                print_binds_human(&serde_json::Value::Object(out));
+            }
+            EXIT_OK
+        }
+        BindsCmd::Set { index, action, profile } => {
+            let (ftype, data) = match parse_funkey_action(action) {
+                Ok(x) => x,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return exit_usage();
+                }
+            };
+            let (current, count) = match api.open_path(&ctx.path).ok().map(|d| mouse::query_8k_profile(d, verbose)) {
+                Some(Ok(p)) => (p.current, p.count),
+                _ => (0, 1),
+            };
+            let target = profile.unwrap_or(current);
+            if target >= count {
+                eprintln!("error: profile {target} does not exist (device has {count})");
+                return exit_unsupported();
+            }
+            if target != current {
+                if let Err(e) = api.open_path(&ctx.path).map(|d| mouse::set_8k_profile(d, target, count, verbose)) {
+                    eprintln!("error: cannot switch to profile {target}: {e:?}");
+                    return exit_protocol();
+                }
+            }
+            let result = api
+                .open_path(&ctx.path)
+                .map_err(|e| e.to_string())
+                .and_then(|d| mouse::set_8k_funkey(d, *index, ftype, &data, verbose).map_err(|e| e.to_string()));
+            if target != current {
+                let _ = api.open_path(&ctx.path).map(|d| mouse::set_8k_profile(d, current, count, verbose));
+            }
+            match result {
+                Ok(()) => {
+                    if !json {
+                        println!("set button {index} -> {} on profile {target}", action);
+                    } else {
+                        println!("{{\"index\": {index}, \"action\": {}, \"profile\": {target}}}",
+                            serde_json::to_string(action).unwrap_or_default());
+                    }
+                    EXIT_OK
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    exit_protocol()
+                }
+            }
+        }
+    }
+}
+
+fn collect_bindings(api: &HidApi, path: &std::ffi::CString, def_indexes: &[u8], verbose: bool) -> Vec<mouse::FunKeyBinding> {
+    let opener = || -> Result<hidapi::HidDevice, String> { api.open_path(path).map_err(|e| e.to_string()) };
+    match mouse::query_8k_funkeys(
+        || opener().map_err(|e| transceiver::ProtocolError { message: e }),
+        def_indexes,
+        verbose,
+    ) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("warning: fun-key query failed: {e}");
+            Vec::new()
+        }
+    }
+}
+
+/// Parse a `binds set` action spec into (type, data).
+fn parse_funkey_action(spec: &str) -> Result<(u8, Vec<u8>), String> {
+    match spec {
+        "remove" => return Ok((mouse::FK_REMOVE, vec![])),
+        "disable" => return Ok((mouse::FK_DISABLE, vec![])),
+        _ => {}
+    }
+    let Some((kind, arg)) = spec.split_once(':') else {
+        return Err(format!("unknown action '{spec}' (expected kind:value, remove, or disable)"));
+    };
+    let be24 = |v: u32| vec![(v >> 16) as u8, (v >> 8) as u8, v as u8];
+    match kind {
+        "mouse" => {
+            let v = basic_key_by_name(arg)?;
+            Ok((mouse::FK_MOUSE, be24(v)))
+        }
+        "media" => {
+            let v = media_key_by_name(arg)?;
+            // numToHighLow default: 2 bytes, LowToHigh.
+            Ok((mouse::FK_MEDIA, vec![v as u8, (v >> 8) as u8]))
+        }
+        "dpi" => {
+            let v = loop_key_by_name(arg)?;
+            Ok((mouse::FK_DPI, vec![v, 0]))
+        }
+        "pollingRate" => {
+            let v = loop_key_by_name(arg)?;
+            Ok((mouse::FK_POLLING_RATE, vec![v, 0]))
+        }
+        "profile" => {
+            let v: u8 = arg.parse().map_err(|_| format!("invalid profile index '{arg}'"))?;
+            Ok((mouse::FK_PROFILE, vec![v]))
+        }
+        "shortcut" => {
+            let v = shortcut_key_by_name(arg)?;
+            Ok((mouse::FK_SHORTCUT, be24(v)))
+        }
+        "light" => {
+            let v: u8 = arg.parse().map_err(|_| format!("invalid light value '{arg}'"))?;
+            Ok((mouse::FK_LIGHT, vec![v]))
+        }
+        "keyboard" => {
+            // keyboard:ctrl+shift+a — modifiers OR'd into byte 0, then up to
+            // two keycodes (low byte; launcher truncates to 8 bits).
+            let mut mask = 0u8;
+            let mut keys: Vec<u8> = Vec::new();
+            for token in arg.split('+') {
+                let t = token.trim();
+                if let Some(bit) = modifier_bit_by_name(t) {
+                    mask |= bit;
+                } else if let Some(code) = crate::r#macro::keycode_by_name(&t.to_uppercase()) {
+                    keys.push((code & 0xFF) as u8);
+                } else {
+                    return Err(format!("unknown keyboard token '{t}'"));
+                }
+            }
+            if keys.len() > 2 {
+                return Err("keyboard bindings support at most 2 keys".into());
+            }
+            while keys.len() < 2 {
+                keys.push(0);
+            }
+            let mut data = vec![mask];
+            data.extend_from_slice(&keys);
+            Ok((mouse::FK_KEYBOARD, data))
+        }
+        _ => Err(format!("unknown action kind '{kind}'")),
+    }
+}
+
+fn basic_key_by_name(name: &str) -> Result<u32, String> {
+    const TABLE: &[(&str, u32)] = &[
+        ("left", 0x010000), ("right", 0x020000), ("middle", 0x040000),
+        ("forward", 0x100000), ("backward", 0x080000), ("leftDouble", 0x800000),
+        ("upScroll", 0x000200), ("downScroll", 0x00FE00), ("leftScroll", 0x0000FE),
+        ("rightScroll", 0x000002), ("leftScrollSustain", 0x4000FF), ("rightScrollSustain", 0x400001),
+    ];
+    if let Some((_, v)) = TABLE.iter().find(|(n, _)| *n == name) {
+        return Ok(*v);
+    }
+    if let Some(hex) = name.strip_prefix("0x") {
+        return u32::from_str_radix(hex, 16).map_err(|_| format!("invalid hex value '{name}'"));
+    }
+    Err(format!("unknown mouse action '{name}'"))
+}
+
+fn media_key_by_name(name: &str) -> Result<u16, String> {
+    const TABLE: &[(&str, u16)] = &[
+        ("volumeUp", 233), ("volumeDown", 234), ("mute", 226), ("player", 387),
+        ("pause", 205), ("previous", 182), ("next", 181), ("stop", 183),
+    ];
+    if let Some((_, v)) = TABLE.iter().find(|(n, _)| *n == name) {
+        return Ok(*v);
+    }
+    name.parse::<u16>().map_err(|_| format!("unknown media key '{name}'"))
+}
+
+fn loop_key_by_name(name: &str) -> Result<u8, String> {
+    match name {
+        "loop" | "1" => Ok(1),
+        "next" | "2" => Ok(2),
+        "prev" | "3" => Ok(3),
+        _ => Err(format!("unknown loop action '{name}' (loop|next|prev)")),
+    }
+}
+
+fn shortcut_key_by_name(name: &str) -> Result<u32, String> {
+    const TABLE: &[(&str, u32)] = &[
+        ("brightnessUp", 814848), ("brightnessDown", 815104), ("calculate", 823809),
+        ("myComputer", 824321), ("homePage", 795394), ("email", 821761),
+        ("refresh", 458814), ("switchApp", 459819), ("task", 827138),
+        ("launchPad", 827394), ("home", 460807), ("screenshot", 461334),
+        ("copy", 459014), ("cut", 459035), ("paste", 459033),
+        ("screenshotMac", 461345), ("copyMac", 460806), ("cutMac", 460827),
+        ("pasteMac", 460825), ("webLessen", 459053), ("webMagnify", 459054),
+        ("webLessenMac", 460845), ("webMagnifyMac", 460846),
+    ];
+    if let Some((_, v)) = TABLE.iter().find(|(n, _)| *n == name) {
+        return Ok(*v);
+    }
+    if let Some(hex) = name.strip_prefix("0x") {
+        return u32::from_str_radix(hex, 16).map_err(|_| format!("invalid hex value '{name}'"));
+    }
+    Err(format!("unknown shortcut '{name}'"))
+}
+
+fn modifier_bit_by_name(name: &str) -> Option<u8> {
+    match name.to_ascii_lowercase().as_str() {
+        "ctrl" | "ctrlL" => Some(1),
+        "shift" | "shiftL" => Some(2),
+        "alt" | "altL" => Some(4),
+        "win" | "winL" => Some(8),
+        "ctrlR" => Some(16),
+        "shiftR" => Some(32),
+        "altR" => Some(64),
+        "winR" => Some(128),
+        _ => None,
+    }
+}
+
+fn print_binds_human(value: &serde_json::Value) {
+    let obj = value.as_object().unwrap();
+    let get = |k: &str| obj.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+    println!("product:    {} (vpid {})", obj.get("product").and_then(|v| v.as_str()).unwrap_or("-"), get("vpid"));
+    println!("profiles:   {} of {} active", get("current_profile") + 1, get("profile_count"));
+    if let Some(serde_json::Value::Array(profiles)) = obj.get("profiles") {
+        for p in profiles {
+            let po = p.as_object().unwrap();
+            let pidx = po.get("profile").and_then(|v| v.as_u64()).unwrap_or(0);
+            println!("\nprofile {}:", pidx + 1);
+            if let Some(serde_json::Value::Array(bindings)) = po.get("bindings") {
+                if bindings.is_empty() {
+                    println!("  (no custom bindings)");
+                }
+                for b in bindings {
+                    let bo = b.as_object().unwrap();
+                    let index = bo.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let key = bo.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                    let action = bo.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+                    let value = bo.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                    let value = if value.is_empty() { String::new() } else { format!(":{value}") };
+                    println!("  [{index}] {key:<10} {action}{value}");
+                }
+            }
+        }
+    }
+}
+
+fn cmd_profile(cmd: &ProfileCmd, api: &HidApi, json: bool, verbose: bool, spec: Option<&str>, interfaces: &[hid::InterfaceInfo]) -> ExitCode {
+    let iface = match select_interface(spec, interfaces) {
+        Ok(i) => i.clone(),
+        Err(code) => return code,
+    };
+    let path = match std::ffi::CString::new(iface.path.as_str()) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: invalid device path: {e}");
+            return exit_runtime();
+        }
+    };
+
+    let read_profile = || -> Result<(u8, u8), String> {
+        let dev = api.open_path(&path).map_err(|e| e.to_string())?;
+        let p = mouse::query_8k_profile(dev, verbose).map_err(|e| e.to_string())?;
+        Ok((p.current, p.count))
+    };
+
+    match cmd {
+        ProfileCmd::List => match read_profile() {
+            Ok((current, count)) => {
+                if json {
+                    println!("{{\"current\": {current}, \"count\": {count}}}");
+                } else {
+                    println!("current: {current} of 0..{}", count.saturating_sub(1));
+                    for i in 0..count {
+                        let marker = if i == current { "*" } else { " " };
+                        println!(" {marker} profile {i}");
+                    }
+                }
+                EXIT_OK
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                exit_protocol()
+            }
+        },
+        ProfileCmd::Select { index } => match read_profile() {
+            Ok((current, count)) => {
+                if *index >= count {
+                    eprintln!("error: profile {index} does not exist (device has {count})");
+                    return exit_unsupported();
+                }
+                if *index == current {
+                    if !json {
+                        println!("already on profile {index}");
+                    }
+                    return EXIT_OK;
+                }
+                match api.open_path(&path).map(|d| mouse::set_8k_profile(d, *index, count, verbose)) {
+                    Ok(Ok(())) => {
+                        if !json {
+                            println!("switched to profile {index}");
+                        }
+                        EXIT_OK
+                    }
+                    Ok(Err(e)) => {
+                        eprintln!("error: {e}");
+                        exit_protocol()
+                    }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        exit_runtime()
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                exit_protocol()
+            }
+        },
+        ProfileCmd::Create => match read_profile() {
+            Ok((current, count)) => {
+                if count >= 5 {
+                    eprintln!("error: profile limit reached ({count})");
+                    return exit_unsupported();
+                }
+                let new_count = count + 1;
+                match api.open_path(&path).map(|d| mouse::set_8k_profile(d, current, new_count, verbose)) {
+                    Ok(Ok(())) => {
+                        if !json {
+                            println!("created profile {new_count} (total {new_count})");
+                        }
+                        EXIT_OK
+                    }
+                    Ok(Err(e)) => {
+                        eprintln!("error: {e}");
+                        exit_protocol()
+                    }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        exit_runtime()
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                exit_protocol()
+            }
+        },
+        ProfileCmd::Remove => match read_profile() {
+            Ok((current, count)) => {
+                if count <= 1 {
+                    eprintln!("error: cannot remove the last profile");
+                    return exit_unsupported();
+                }
+                let new_count = count - 1;
+                let target = if current >= new_count { 0 } else { current };
+                match api.open_path(&path).map(|d| mouse::set_8k_profile(d, target, new_count, verbose)) {
+                    Ok(Ok(())) => {
+                        if !json {
+                            println!("removed profile; {new_count} remain (active: {target})");
+                        }
+                        EXIT_OK
+                    }
+                    Ok(Err(e)) => {
+                        eprintln!("error: {e}");
+                        exit_protocol()
+                    }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        exit_runtime()
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                exit_protocol()
+            }
+        },
     }
 }
 

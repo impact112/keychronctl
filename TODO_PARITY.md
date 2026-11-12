@@ -16,9 +16,9 @@ Legend: ✅ done · 🔄 in progress · ⬜ todo · 🚫 wontdo
 | JSON output (`--json`) | ✅ | |
 | Protocol trace (`-v`) | ✅ | hex dump in/out, unmatched-report logging |
 | Exit codes per docs/CLI.md | ✅ | 0/1/3/4 exercised |
-| Definitions fetch/cache (`definitions fetch/list/show`) | 🔄 | module in progress |
-| Offline mode (`--offline`, `--no-cache`, `--cache-dir`) | ⬜ | |
-| Product catalog lookup (name for vpid) | ⬜ | via vapi product info |
+| Definitions fetch/cache (`definitions fetch/list/show`) | ✅ | live-verified; `--offline`/`--no-cache`/`--cache-dir` flags |
+| Product catalog lookup (name for vpid) | ✅ | via vapi product info; shown in `info` |
+| Keyboard keymap/macro CLI commands | ⬜ | modules ready (`keymap.rs`, `macro.rs`); wiring pending a test keyboard |
 
 ## Mouse (M6 via Link-KM dongle — 8k wire protocol, reportId 181/182)
 
@@ -26,9 +26,12 @@ Legend: ✅ done · 🔄 in progress · ⬜ todo · 🚫 wontdo
 |---|---|---|
 | Link version info | ✅ | cmd 2: fw 1.0.3, work mode, feature flags |
 | Receiver state / bond list | ✅ | cmd 3: 3 fixed slots, identifies paired mouse |
-| Battery readout | 🔄 | 8k power query being traced in bundles |
-| DPI levels get | 🔄 | response layout being traced |
+| Battery readout | ✅ | cmd 6 snapshot: 96 %, discharging (live) |
+| DPI levels get | ✅ | stock 400–5000 ladder, level 5 active (live) |
 | DPI levels set | ⬜ | |
+| **Binds: list per profile** | ✅ | cmds 97/98; annotated with definition key names (live) |
+| **Binds: set** | ✅ | cmd 82, ack 0xE4; mouse/media/keyboard/dpi/pollingRate/profile/shortcut/light/remove/disable (live round-trip) |
+| **Profiles: list/select/create/remove** | ✅ | cmd 14 on reportId 181; count field creates/removes (live round-trip) |
 | Polling rate get/set | ⬜ | launcher: 8k cmd on reportId 181 |
 | Lighting get/set/save | ⬜ | cmds 32/36 (8k) |
 | Fun keys (button remap) | ⬜ | reportId 179, cmd 48/49/50 |
@@ -41,13 +44,13 @@ Legend: ✅ done · 🔄 in progress · ⬜ todo · 🚫 wontdo
 | Feature | Status | Notes |
 |---|---|---|
 | Protocol version (0x01) / KC version (0xA0) / fw (0xA1) | ✅ | implemented; untested |
-| Feature flags (0xA2) | ⬜ | gates per-command availability |
-| Layer count (0x11) / current layer (0xA3) | ⬜ | |
-| Keymap dump (0x12, 14-key chunks) | 🔄 | module in progress |
-| Keymap get/set (0x04/0x05) | 🔄 | module in progress |
-| Keymap clear (0x06) | ⬜ | |
-| Knob/encoder get/set (0x14/0x15) | ⬜ | |
-| Macro list/dump/set/reset (0x0C–0x10) | 🔄 | V9/V11 encodings |
+| Feature flags (0xA2) | ✅ | V4/V2 parsers + named bits, unit-tested |
+| Layer count (0x11) / current layer (0xA3) | ✅ | implemented; untested |
+| Keymap dump (0x12, 14-key chunks) | ✅ | chunk math + decode unit-tested |
+| Keymap get/set (0x04/0x05) | ✅ | 0x04 shape inferred (spec §8) |
+| Keymap clear (0x06) | ✅ | implemented; untested |
+| Knob/encoder get/set (0x14/0x15) | ✅ | implemented; untested |
+| Macro list/dump/set/reset (0x0C–0x10) | ✅ | V9/V11 encoders unit-tested; echo-verified writes |
 | Macro repeat (0xA7 sub 27/28) | ⬜ | |
 | Lighting get/set/save (0x07/0x08/0x09) | 🔄 | v3 param IDs (protocol ≥ 11) |
 | Per-key RGB (0xA8) | ⬜ | |

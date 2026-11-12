@@ -188,6 +188,18 @@ After FR connect, normal QMK keyboard commands are tunneled through the receiver
 - **8k** (reportId 181/179): cmd 2 = version (vid=`r[4]<<8|r[3]`, pid=`r[6]<<8|r[5]`, version=`r[2]<<8|r[1]`, frVersion=`r[8].(r[7]>>4).(r[7]&15)`, workMode, feature flags bytes 11–16); 32/36 lighting get/set `[36, target, effect, ?, speed, r, g, b]`; 49/50 fun-key get/set `[48, layer, keyIdx, type, data...]` — types: Remove=0, Mouse=1, Keyboard=2, Media=3, Macro=4, Dpi=5, Light=6, Game=7, ShortCut=8, Disable=9, Profile=10, PollingRate=13; 0xE1 monitor-light notifications; 0xE4 set-ack echo.
 - **4k/8k_nordic** (reportId 0, 64 B + checksum): version query `[0, ?, 0x81, 0, workMode<<6, ...]`; resp `(r[0]===0||r[0]===64)&&r[3]===0`, version = `r[9].(r[8]>>4).(r[8]&15)`.
 
+**8k fun keys (button bindings, reportId 179, 63-byte buffers) — live-verified on M6/Link-KM:**
+
+| Operation | Request | Response |
+|---|---|---|
+| Get-all bound indexes | cmd 97 | `[97, count, entries...]`; each entry is `2 + (entry[0] >> 5)` bytes, key index = `entry[0] & 0x1F` |
+| Get one binding | `[98, keyIndex]` | `[98, keyIdx, ?, type, data...]` |
+| Set one binding | `[82, keyIndex, 0, type, data...]` | ack `[0xE4, 0, 82]` (cmd 82, not 48 — cmd 48 is the bridge-module variant) |
+
+Types (`EFunKey`): Remove=0, Mouse=1, Keyboard=2, Media=3, Macro=4, Dpi=5, Light=6, Game=7, ShortCut=8, Disable=9, Profile=10, PollingRate=13. Data encodings (launcher `numToHighLow(value)` defaults to **2 bytes LowToHigh** — mind the order): Mouse = 24-bit HighToLow (`EBasicKey`: left=0x010000, right=0x020000, middle=0x040000, backward=0x080000, forward=0x100000, leftDouble=0x800000, upScroll=0x200, downScroll=0xFE00, leftScroll=0xFE, rightScroll=0x02, sustain variants 0x4000FF/0x400001); Keyboard = `[modifierMask, key1, key2]` (modifiers ctrl=1, shift=2, alt=4, win=8, +R variants 16–128); Media = 16-bit LowToHigh (`EMediaKey`: mute=226, next=181, previous=182, stop=183, pause=205, player=387, volumeUp=233, volumeDown=234); Dpi/PollingRate = `[ELoopKey, 0]` (loop=1, next=2, prev=3); ShortCut = 24-bit HighToLow (`EShortcutKey` table, e.g. copy=459014, paste=459033); Profile = `[index]`; Light = `[value]`.
+
+**8k profiles — live-verified:** info comes from the cmd-6 settings snapshot (current = r[1], count = r[50]). Switch/create/remove is one command: `[14, profile, count]` on reportId 181, ack `[0xE4, 0, 14]`. Switching passes the current count; changing the count creates/removes profiles (launcher `switchProfileLevelNum`; if active ≥ new count it resets to 0). Profile-change async notifications arrive on IN report 229 (0xE5) with the new current index at byte 1.
+
 ---
 
 ## 4. Protocol version detection (connect sequence)
