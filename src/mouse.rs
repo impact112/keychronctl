@@ -545,7 +545,7 @@ fn decode_funkey_value(ftype: u8, data: &[u8]) -> Option<String> {
             let v = u24(data);
             Some(shortcut_key_name(v).map(|s| s.to_string()).unwrap_or_else(|| format!("0x{v:06X}")))
         }
-        FK_PROFILE if !data.is_empty() => Some(format!("profile {}", data[0])),
+        FK_PROFILE if !data.is_empty() => Some(format!("{}", data[0])),
         FK_LIGHT if !data.is_empty() => Some(format!("{}", data[0])),
         _ => None,
     }
@@ -781,6 +781,8 @@ pub fn query_8k_snapshot(dev: HidDevice, verbose: bool) -> Result<SettingsSnapsh
 }
 
 /// Helper: run one 20-byte report-181 command, expecting the 0xE4 ack.
+/// A status-4 rejection right after an RF reconnect is transient on some
+/// dongles — retried once after a short pause.
 fn ack_command(
     dev: HidDevice,
     payload: &[u8],
@@ -794,6 +796,15 @@ fn ack_command(
         return Err(ProtocolError {
             message: format!("cmd {cmd} ack mismatch: {}", crate::transceiver::hex(&resp)),
         });
+    }
+    if resp[1] == 4 {
+        // Transient rejection (RF reconnect): pause and retry once.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if let Ok(resp) = t.request(payload, 0xE4) {
+            if resp.len() >= 3 && resp[2] == cmd && resp[1] == 0 {
+                return Ok(resp);
+            }
+        }
     }
     if resp[1] != 0 {
         return Err(ProtocolError {
@@ -928,7 +939,8 @@ pub fn query_8k_light(dev: HidDevice, verbose: bool) -> Result<LightInfo, Protoc
 }
 
 /// Write lighting (cmd 36 on reportId 181): `[36, mode, brightness, speed,
-/// r, g, b]`.
+/// r, g, b]`. The launcher does not wait for an ack; we verify by reading
+/// back (cmd 35), which fails cleanly on devices without RGB hardware.
 pub fn set_8k_light(
     dev: HidDevice,
     mode: u8,
@@ -936,12 +948,22 @@ pub fn set_8k_light(
     speed: u8,
     rgb: [u8; 3],
     verbose: bool,
-) -> Result<(), ProtocolError> {
+) -> Result<LightInfo, ProtocolError> {
     let mut t = Transceiver::new(dev, REPORT_8K_VERSION, SMALL_BUF);
     t.verbose = verbose;
     let payload = [36, mode, brightness, speed, rgb[0], rgb[1], rgb[2]];
-    // The launcher does not wait for an ack on this write; mirror that and
-    // verify by reading back.
     t.write(&payload)?;
-    Ok(())
+    // Give the device a moment, then read the state back for verification.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let resp = t.read_expect(33, t.timeout)?;
+    if resp.len() < 7 {
+        return Err(ProtocolError { message: "short lighting response".into() });
+    }
+    Ok(LightInfo {
+        protocol: "8k",
+        mode: resp[1],
+        brightness: resp[2],
+        speed: resp[3],
+        rgb: [resp[4], resp[5], resp[6]],
+    })
 }

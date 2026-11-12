@@ -262,7 +262,7 @@ fn main() -> ExitCode {
         Command::List => cmd_list(cli.json, &interfaces),
         Command::Info => cmd_info(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
         Command::Battery => cmd_battery(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
-        Command::Dpi { cmd } => cmd_dpi(cmd, &api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
+        Command::Dpi { cmd } => cmd_dpi(cmd, &api, &cli, &interfaces),
         Command::Pollrate { cmd } => cmd_simple_setting(SettingKind::Pollrate, cmd, &api, &cli, &interfaces),
         Command::Sleep { cmd } => cmd_simple_setting(SettingKind::Sleep, cmd, &api, &cli, &interfaces),
         Command::Debounce { cmd } => cmd_simple_setting(SettingKind::Debounce, cmd, &api, &cli, &interfaces),
@@ -334,18 +334,23 @@ fn select_interface<'a>(
     spec: Option<&str>,
     interfaces: &'a [hid::InterfaceInfo],
 ) -> Result<&'a hid::InterfaceInfo, ExitCode> {
-    if let Some(spec) = spec {
-        return match hid::match_selector(spec, interfaces) {
-            Some(i) => Ok(i),
-            None => {
-                eprintln!("error: no interface matches device selector '{spec}'");
-                Err(exit_no_device())
-            }
-        };
-    }
-    // Auto-select by role priority: mouse interfaces first (current focus),
-    // then keyboard, then bridge.
+    // Role priority: mouse interfaces first (current focus), then keyboard,
+    // then bridge. Also applies to explicit selectors, because one hidraw
+    // node can carry several roles (Link-KM: bridge + mouse-8k).
     let priority = [hid::Role::Mouse8k, hid::Role::Mouse4k, hid::Role::Keyboard, hid::Role::Bridge];
+    if let Some(spec) = spec {
+        let matches = hid::match_selector_all(spec, interfaces);
+        if matches.is_empty() {
+            eprintln!("error: no interface matches device selector '{spec}'");
+            return Err(exit_no_device());
+        }
+        for role in priority {
+            if let Some(i) = matches.iter().find(|i| i.role == role) {
+                return Ok(i);
+            }
+        }
+        return Ok(matches[0]);
+    }
     for role in priority {
         if let Some(i) = interfaces.iter().find(|i| i.role == role) {
             return Ok(i);
@@ -515,19 +520,20 @@ fn cmd_battery(
 fn cmd_dpi(
     cmd: &Option<DpiCmd>,
     api: &HidApi,
-    json: bool,
-    verbose: bool,
-    spec: Option<&str>,
+    cli: &Cli,
     interfaces: &[hid::InterfaceInfo],
 ) -> ExitCode {
-    let (iface, dev) = match open_selected(api, spec, interfaces) {
-        Ok(x) => x,
+    let json = cli.json;
+    let verbose = cli.verbose;
+    let ctx = match mouse_context(api, cli, cli.device.as_deref(), interfaces) {
+        Ok(c) => c,
         Err(code) => return code,
     };
-    if !matches!(iface.role, hid::Role::Mouse8k | hid::Role::Mouse4k) {
-        eprintln!("error: DPI requires a mouse interface; use `keychronctl list`");
-        return exit_unsupported();
-    }
+    let iface = ctx.iface.clone();
+    let dev = match reopen(api, &iface) {
+        Ok(d) => d,
+        Err(c) => return c,
+    };
 
     let Some(DpiCmd::Set { level, levels, value }) = cmd else {
         // Plain `dpi` — show the current ladder.
@@ -581,9 +587,18 @@ fn cmd_dpi(
     if let Some(v) = value {
         values[new_level as usize] = *v;
     }
-    // Enforce the device-reported max/step when known (read from snapshot 2).
-    let max = ((snap.dpi_values.iter().max().copied().unwrap_or(0) as u32) * 2).min(u16::MAX as u32);
-    let _ = max; // the authoritative max comes from the definition; warn only on obvious overflow
+    // Enforce the device-reported DPI limits from the definition
+    // (e.g. [50, 12000] on the M6) — the firmware itself accepts values
+    // beyond its real sensor range.
+    if let definition::Definition::Mouse(m) = &ctx.def {
+        if m.dpi.as_ref().map(|d| d.limit.len()) == Some(2) {
+            let (min, max) = (m.dpi.as_ref().unwrap().limit[0], m.dpi.as_ref().unwrap().limit[1]);
+            if let Some(&bad) = values.iter().find(|&&v| v < min || v > max) {
+                eprintln!("error: DPI {bad} outside device range {min}..={max}");
+                return exit_usage();
+            }
+        }
+    }
     if values.iter().any(|&v| v == 0) {
         eprintln!("error: DPI values must be > 0");
         return exit_usage();
@@ -783,11 +798,13 @@ fn cmd_simple_setting(
                 .iter()
                 .position(|&l| mouse::polling_hz(l) == Some(hz))
             else {
-                let supported: Vec<u32> = snap
+                let mut supported: Vec<u32> = snap
                     .rate_table
                     .iter()
                     .filter_map(|&l| mouse::polling_hz(l))
                     .collect();
+                supported.sort_unstable();
+                supported.dedup();
                 eprintln!("error: {hz} Hz not supported (device offers {supported:?})");
                 return exit_unsupported();
             };
@@ -886,12 +903,19 @@ fn cmd_simple_setting(
                 None => current.as_ref().map(|c| c.rgb).unwrap_or([255, 255, 255]),
             };
             match mouse::set_8k_light(dev, mode, b, s, color, verbose) {
-                Ok(()) => {
-                    println!("lighting set: mode {mode}, brightness {b}, speed {s}, rgb {:?}", color);
+                Ok(l) => {
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&l).unwrap_or_default());
+                    } else {
+                        println!("lighting set: mode {}, brightness {}, speed {}, rgb {:?}", l.mode, l.brightness, l.speed, l.rgb);
+                    }
                     EXIT_OK
                 }
                 Err(e) => {
                     eprintln!("error: {e}");
+                    if e.to_string().contains("timeout") {
+                        eprintln!("hint: this device likely has no RGB lighting (the M6 has none)");
+                    }
                     exit_protocol()
                 }
             }
@@ -1243,8 +1267,7 @@ fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::Interfa
     let verbose = cli.verbose;
     let json = cli.json;
 
-    match cmd {
-        BindsCmd::List { profile } => {
+    match cmd {        BindsCmd::List { profile } => {
             let (current, count) = match api.open_path(&ctx.path).ok().map(|d| mouse::query_8k_profile(d, verbose)) {
                 Some(Ok(p)) => (p.current, p.count),
                 _ => {
@@ -1319,6 +1342,16 @@ fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::Interfa
             EXIT_OK
         }
         BindsCmd::Set { index, action, profile } => {
+            // Validate the button index against the device definition — the
+            // dongle ACKs any index, even nonexistent buttons.
+            if let definition::Definition::Mouse(m) = &ctx.def {
+                if !m.keys.iter().any(|k| k.index == *index) {
+                    let valid: Vec<u8> = m.keys.iter().map(|k| k.index).collect();
+                    eprintln!("error: button index {index} is not a device button (valid: {valid:?}; see `binds list`)");
+                    return exit_usage();
+                }
+            }
+
             let (ftype, data) = match parse_funkey_action(action) {
                 Ok(x) => x,
                 Err(e) => {
