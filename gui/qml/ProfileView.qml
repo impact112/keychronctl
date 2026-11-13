@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import "components"
 
 // Profiles: list, select, create, remove.
 ScrollView {
@@ -43,22 +44,17 @@ ScrollView {
         Label {
             visible: !view.profileData
             text: qsTr("No profile data — is the device connected?")
-            color: "#565f89"
         }
 
         Repeater {
             model: view.profileData ? view.profileData.count : 0
 
-            delegate: Rectangle {
+            delegate: ItemDelegate {
                 id: row
                 required property int index
                 property bool isCurrent: view.profileData && view.profileData.current === row.index
                 Layout.fillWidth: true
                 height: 44
-                radius: 8
-                color: row.isCurrent ? "#2a2b3d" : "#1f2033"
-                border.width: row.isCurrent ? 1 : 0
-                border.color: "#7aa2f7"
 
                 RowLayout {
                     anchors.fill: parent
@@ -67,7 +63,7 @@ ScrollView {
 
                     Label {
                         text: (row.isCurrent ? "● " : "○ ") + qsTr("Profile %1").arg(row.index + 1)
-                        color: row.isCurrent ? "#c0caf5" : "#a9b1d6"
+                        font.bold: row.isCurrent
                         Layout.fillWidth: true
                     }
                     Button {

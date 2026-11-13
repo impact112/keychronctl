@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import "components"
 
 // Performance: DPI ladder, polling rate, sensor, debounce, sleep, scroll.
 ScrollView {
@@ -41,7 +42,7 @@ ScrollView {
     }
 
     function setDpiLevel(idx) {
-        root.request("dpi", root.deviceArg().concat(["set", "--level", String(idx)]), (d, code, err) => {
+        root.request("dpi", root.deviceArg().concat(["set", "--stage", String(idx)]), (d, code, err) => {
             if (err) root.backendError = err; else load();
         });
     }
@@ -108,20 +109,21 @@ ScrollView {
                                             ? view.dpiData.current_levels[0] === stage.index
                                             : false
 
-                    Rectangle {
-                        Layout.preferredWidth: 90
-                        Layout.preferredHeight: 44
-                        radius: 8
-                        color: stage.isCurrent ? "#2a2b3d" : "#1f2033"
-                        border.width: stage.isCurrent ? 2 : 0
-                        border.color: "#7aa2f7"
+                    Frame {
+                        Layout.preferredWidth: 100
+                        padding: 4
+
+                        background: Rectangle {
+                            radius: 6
+                            color: stage.isCurrent ? palette.highlight : "transparent"
+                            border.color: stage.isCurrent ? palette.highlight : palette.mid
+                        }
 
                         ColumnLayout {
                             anchors.centerIn: parent
                             spacing: 0
                             Label {
                                 text: qsTr("Stage %1").arg(stage.index + 1)
-                                color: "#565f89"
                                 font.pixelSize: 10
                                 Layout.alignment: Qt.AlignHCenter
                             }
@@ -153,7 +155,6 @@ ScrollView {
 
         Label {
             text: qsTr("Click a stage to make it active; edit values and press Apply.")
-            color: "#565f89"
             font.pixelSize: 11
         }
 
@@ -167,7 +168,6 @@ ScrollView {
             Repeater {
                 model: {
                     if (!view.pollData || !view.pollData.levelsHz) return [];
-                    // unique Hz values in table order
                     const seen = [], out = [];
                     for (const hz of view.pollData.levelsHz)
                         if (!seen.includes(hz)) { seen.push(hz); out.push(hz); }
@@ -219,7 +219,7 @@ ScrollView {
             }
 
             RowLayout {
-                Label { text: qsTr("Lift-off distance"); color: "#a9b1d6" }
+                Label { text: qsTr("Lift-off distance") }
                 ComboBox {
                     model: ["0", "1", "2", "3"]
                     currentIndex: view.settingsData ? view.settingsData.sys.lod : 0
@@ -232,7 +232,7 @@ ScrollView {
         SectionHeader { title: qsTr("Debounce") }
 
         RowLayout {
-            Label { text: qsTr("Response time"); color: "#a9b1d6" }
+            Label { text: qsTr("Response time") }
             ComboBox {
                 model: {
                     const opts = view.debounceData && view.debounceData.options
@@ -254,7 +254,7 @@ ScrollView {
         SectionHeader { title: qsTr("Sleep timer") }
 
         RowLayout {
-            Label { text: qsTr("Device sleeps after"); color: "#a9b1d6" }
+            Label { text: qsTr("Device sleeps after") }
             ComboBox {
                 id: sleepCombo
                 model: [qsTr("1 min"), qsTr("5 min"), qsTr("10 min"), qsTr("15 min"),
@@ -273,7 +273,7 @@ ScrollView {
         SectionHeader { title: qsTr("Scroll wheel") }
 
         RowLayout {
-            Label { text: qsTr("Speed"); color: "#a9b1d6" }
+            Label { text: qsTr("Speed") }
             SpinBox {
                 from: 0
                 to: 100

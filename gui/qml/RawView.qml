@@ -32,7 +32,6 @@ ColumnLayout {
                 const parts = cmdBox.editText.trim().split(/\s+/);
                 const command = parts[0];
                 const rest = parts.slice(1);
-                // Device-scoped commands get the selector unless it's `list`.
                 const args = command === "list" ? rest : root.deviceArg().concat(rest);
                 root.request(command, args, (data, code, err) => {
                     if (data !== null) view.output = JSON.stringify(data, null, 2);
@@ -50,9 +49,7 @@ ColumnLayout {
             readOnly: true
             font.family: "monospace"
             font.pixelSize: 12
-            color: "#a9b1d6"
             text: view.output
-            background: Rectangle { color: "#16161e"; radius: 8 }
             wrapMode: TextArea.Wrap
         }
     }

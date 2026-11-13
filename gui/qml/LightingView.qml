@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import "components"
 
 // Lighting: mode / brightness / speed / color. Devices without RGB simply
 // fail the query; the view shows a hint instead.
@@ -46,7 +47,6 @@ ScrollView {
         Label {
             visible: view.noRgb
             text: qsTr("This device does not appear to have RGB lighting.")
-            color: "#e0af68"
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
@@ -57,7 +57,7 @@ ScrollView {
             Layout.fillWidth: true
 
             RowLayout {
-                Label { text: qsTr("Mode"); color: "#a9b1d6" }
+                Label { text: qsTr("Mode") }
                 SpinBox {
                     from: 0
                     to: 20
@@ -66,7 +66,7 @@ ScrollView {
                 }
             }
             RowLayout {
-                Label { text: qsTr("Brightness"); color: "#a9b1d6" }
+                Label { text: qsTr("Brightness") }
                 Slider {
                     from: 0
                     to: 100
@@ -76,7 +76,7 @@ ScrollView {
                 }
             }
             RowLayout {
-                Label { text: qsTr("Speed"); color: "#a9b1d6" }
+                Label { text: qsTr("Speed") }
                 Slider {
                     from: 0
                     to: 100
@@ -86,22 +86,19 @@ ScrollView {
                 }
             }
             RowLayout {
-                Label { text: qsTr("Color"); color: "#a9b1d6" }
-                Rectangle {
-                    width: 40
-                    height: 24
-                    radius: 6
-                    color: view.lightData
-                           ? Qt.rgba(view.lightData.rgb[0] / 255,
-                                     view.lightData.rgb[1] / 255,
-                                     view.lightData.rgb[2] / 255, 1)
-                           : "#888"
-                    border.color: "#565f89"
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: colorDialog.open()
+                Label { text: qsTr("Color") }
+                Button {
+                    // Color swatch preview + picker trigger.
+                    property var rgb: view.lightData ? view.lightData.rgb : [128,128,128]
+                    background: Rectangle {
+                        implicitWidth: 40
+                        implicitHeight: 24
+                        radius: 6
+                        color: Qt.rgba(parent.rgb[0] / 255, parent.rgb[1] / 255, parent.rgb[2] / 255, 1)
+                        border.color: palette.mid
                     }
+                    text: ""
+                    onClicked: colorDialog.open()
                 }
             }
             Button {
@@ -121,32 +118,30 @@ ScrollView {
         modal: true
         padding: 12
 
-        background: Rectangle { radius: 12; color: "#1f2033"; border.color: "#565f89" }
-
         contentItem: ColumnLayout {
             spacing: 10
-            Label { text: qsTr("Pick a color"); color: "#e6e9f0" }
+            Label { text: qsTr("Pick a color") }
 
             Slider {
                 id: sr
                 Layout.fillWidth: true
                 from: 0; to: 255
                 value: view.lightData ? view.lightData.rgb[0] : 255
-                Text { text: "R " + parent.value; color: "#f7768e"; anchors.left: parent.right; anchors.leftMargin: 8 }
+                Text { text: "R " + parent.value; anchors.left: parent.right; anchors.leftMargin: 8 }
             }
             Slider {
                 id: sg
                 Layout.fillWidth: true
                 from: 0; to: 255
                 value: view.lightData ? view.lightData.rgb[1] : 255
-                Text { text: "G " + parent.value; color: "#9ece6a"; anchors.left: parent.right; anchors.leftMargin: 8 }
+                Text { text: "G " + parent.value; anchors.left: parent.right; anchors.leftMargin: 8 }
             }
             Slider {
                 id: sb
                 Layout.fillWidth: true
                 from: 0; to: 255
                 value: view.lightData ? view.lightData.rgb[2] : 255
-                Text { text: "B " + parent.value; color: "#7aa2f7"; anchors.left: parent.right; anchors.leftMargin: 8 }
+                Text { text: "B " + parent.value; anchors.left: parent.right; anchors.leftMargin: 8 }
             }
 
             Rectangle {

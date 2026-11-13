@@ -12,7 +12,6 @@ RowLayout {
     spacing: 8
     Label {
         text: control.label
-        color: "#a9b1d6"
         Layout.fillWidth: true
     }
     Switch {

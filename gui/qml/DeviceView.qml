@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import "components"
 
 // Device info view: populates from `info`, `battery`, `settings`.
 ScrollView {
@@ -35,23 +36,23 @@ ScrollView {
             columnSpacing: 24
             rowSpacing: 6
 
-            Label { text: qsTr("Product"); color: "#565f89" }
-            Label { text: view.info ? view.info.product : "—"; color: "#c0caf5"; font.bold: true }
+            Label { text: qsTr("Product") }
+            Label { text: view.info ? view.info.product : "—"; font.bold: true }
 
-            Label { text: qsTr("Interface"); color: "#565f89" }
-            Label { text: view.info ? (view.info.role + " · " + view.info.path) : "—"; color: "#c0caf5" }
+            Label { text: qsTr("Interface") }
+            Label { text: view.info ? (view.info.role + " · " + view.info.path) : "—" }
 
-            Label { text: qsTr("VID:PID"); color: "#565f89" }
-            Label { text: view.info ? view.info["vid:pid"] : "—"; color: "#c0caf5" }
+            Label { text: qsTr("VID:PID") }
+            Label { text: view.info ? view.info["vid:pid"] : "—" }
 
-            Label { text: qsTr("Protocol"); color: "#565f89" }
-            Label { text: view.info ? view.info.protocol : "—"; color: "#c0caf5" }
+            Label { text: qsTr("Protocol") }
+            Label { text: view.info ? view.info.protocol : "—" }
 
-            Label { text: qsTr("Firmware"); color: "#565f89" }
-            Label { text: view.info ? view.info.version : "—"; color: "#c0caf5" }
+            Label { text: qsTr("Firmware") }
+            Label { text: view.info ? view.info.version : "—" }
 
-            Label { text: qsTr("Connection"); color: "#565f89" }
-            Label { text: view.info ? view.info.work_mode : "—"; color: "#c0caf5" }
+            Label { text: qsTr("Connection") }
+            Label { text: view.info ? view.info.work_mode : "—" }
         }
 
         SectionHeader { title: qsTr("Battery") }
@@ -59,32 +60,32 @@ ScrollView {
         RowLayout {
             spacing: 12
 
+            // Battery gauge (plain rectangle: Breeze's ProgressBar has
+            // sizing TypeErrors with implicit layouts).
             Rectangle {
-                width: 220
-                height: 22
-                radius: 6
-                color: "#1f2033"
-                border.color: "#565f89"
+                id: batteryBar
+                property int pct: view.info ? view.info.battery_percent : 0
+                Layout.preferredWidth: 220
+                Layout.preferredHeight: 18
+                radius: 4
+                border.color: palette.mid
+                color: "transparent"
 
                 Rectangle {
-                    // Battery percentage bar.
-                    property int pct: view.info ? view.info.battery_percent : 0
-                    width: parent.width * pct / 100
+                    width: parent.width * parent.pct / 100
                     height: parent.height
-                    radius: 6
-                    color: pct > 40 ? "#9ece6a" : (pct > 15 ? "#e0af68" : "#f7768e")
+                    radius: 4
+                    color: parent.pct > 40 ? "#6aa84f" : (parent.pct > 15 ? "#cc8800" : "#cc2200")
                 }
 
                 Label {
                     anchors.centerIn: parent
-                    text: view.info ? (view.info.battery_percent + "%") : "—"
-                    color: "#c0caf5"
+                    text: parent.pct + "%"
                 }
             }
 
             Label {
                 text: view.info && view.info.charging ? qsTr("charging") : qsTr("discharging")
-                color: view.info && view.info.charging ? "#9ece6a" : "#a9b1d6"
             }
         }
 
@@ -95,7 +96,6 @@ ScrollView {
             delegate: Label {
                 required property var modelData
                 Layout.fillWidth: true
-                color: modelData.active ? "#9ece6a" : "#565f89"
                 text: (modelData.active ? "● " : "○ ") + (modelData.vpid) +
                       "  (" + modelData.slot + ")"
             }

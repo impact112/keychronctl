@@ -23,7 +23,7 @@ const EXIT_OK: ExitCode = ExitCode::SUCCESS;
 #[command(name = "keychronctl", version, about = "Configure Keychron devices over USB HID")]
 struct Cli {
     /// Device selector: vpid, VID:PID, or hidraw path
-    #[arg(short, long, value_name = "SPEC")]
+    #[arg(short, long, value_name = "SPEC", global = true)]
     device: Option<String>,
 
     /// Machine-readable JSON output
@@ -114,17 +114,18 @@ enum Command {
 
 #[derive(Subcommand)]
 enum DpiCmd {
-    /// Switch the active DPI level, replace the ladder, or set one value
+    /// Switch the active DPI stage, replace the ladder, or set one value
     Set {
-        /// Active level index, 0-based (e.g. 0 = lowest stage)
-        #[arg(long, value_name = "N")]
-        level: Option<u8>,
+        /// DPI value to write to the current (or --stage) stage,
+        /// e.g. `dpi set 800`
+        #[arg(value_name = "DPI")]
+        value: Option<u16>,
+        /// Active stage index, 0-based (e.g. 0 = lowest stage)
+        #[arg(long, value_name = "N", alias = "level")]
+        stage: Option<u8>,
         /// New DPI ladder, comma-separated (e.g. 400,800,1600,3200,5000)
         #[arg(long, value_name = "LIST")]
         levels: Option<String>,
-        /// Set the current level's DPI value
-        #[arg(long, value_name = "DPI")]
-        value: Option<u16>,
     },
 }
 
@@ -535,7 +536,7 @@ fn cmd_dpi(
         Err(c) => return c,
     };
 
-    let Some(DpiCmd::Set { level, levels, value }) = cmd else {
+    let Some(DpiCmd::Set { value, stage, levels }) = cmd else {
         // Plain `dpi` — show the current ladder.
         let result = mouse::query_8k_dpi(dev, verbose)
             .map(|d| serde_json::to_value(&d).unwrap_or_default())
@@ -558,9 +559,9 @@ fn cmd_dpi(
     let mut values = snap.dpi_values;
     let mut new_level = snap.dpi_levels[0];
 
-    if let Some(l) = level {
+    if let Some(l) = stage {
         if *l >= snap.dpi_level_num {
-            eprintln!("error: level {l} out of range (device has {})", snap.dpi_level_num);
+            eprintln!("error: stage {l} out of range (device has {})", snap.dpi_level_num);
             return exit_usage();
         }
         new_level = *l;
@@ -614,16 +615,16 @@ fn cmd_dpi(
                 println!(
                     "{}",
                     serde_json::json!({
-                        "level": new_level,
+                        "stage": new_level,
                         "levels": values[..snap.dpi_level_num as usize],
                         "levelNum": snap.dpi_level_num,
                     })
                 );
             } else {
-                println!("DPI set: level {} -> {}", new_level, values[new_level as usize]);
+                println!("DPI set: stage {} -> {}", new_level, values[new_level as usize]);
                 for (i, v) in values.iter().enumerate().take(snap.dpi_level_num as usize) {
                     let marker = if i as u8 == new_level { "*" } else { " " };
-                    println!(" {marker} level {i}: {v}");
+                    println!(" {marker} stage {i}: {v}");
                 }
             }
             EXIT_OK
@@ -1134,10 +1135,10 @@ fn print_settings_human(v: &serde_json::Value) {
     println!("profile:    {} of {}", get_u("profile") + 1, get_u("profile_count"));
     let dpi_levels: Vec<u64> = v.get("dpi_values").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64()).collect()).unwrap_or_default();
     let cur = v.get("dpi_levels").and_then(|x| x.as_array()).and_then(|a| a.first()).and_then(|x| x.as_u64()).unwrap_or(0);
-    println!("dpi:        level {} ({} DPI)", cur, dpi_levels.get(cur as usize).copied().unwrap_or(0));
+    println!("dpi:        stage {} ({} DPI)", cur, dpi_levels.get(cur as usize).copied().unwrap_or(0));
     for (i, d) in dpi_levels.iter().take(get_u("dpi_level_num") as usize).enumerate() {
         let marker = if i as u64 == cur { "*" } else { " " };
-        println!(" {marker} level {i}: {d}");
+        println!(" {marker} stage {i}: {d}");
     }
     let rates: Vec<u64> = v.get("rate_table").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64()).collect()).unwrap_or_default();
     let rcur = v.get("rate_levels").and_then(|x| x.as_array()).and_then(|a| a.first()).and_then(|x| x.as_u64()).unwrap_or(0);
@@ -1833,7 +1834,7 @@ fn print_dpi_human(dpi: &serde_json::Map<String, serde_json::Value>) {
         if let Some(level) = current.first().and_then(|v| v.as_u64()) {
             if let Some(levels) = dpi.get("levels").and_then(|v| v.as_array()) {
                 let value = levels.get(level as usize).and_then(|v| v.as_u64());
-                println!("dpi:        level {} of {}{}", level + 1, levels.len(),
+                println!("dpi:        stage {} of {}{}", level, levels.len(),
                     value.map(|v| format!(" ({v} DPI)")).unwrap_or_default());
             }
         }

@@ -11,7 +11,11 @@ ApplicationWindow {
     minimumHeight: 600
     visible: true
     title: qsTr("Keychron Launcher")
-    color: "#1a1b26"
+
+    // Backend instance (drives the external CLI subprocess).
+    Backend {
+        id: backend
+    }
 
     // ------- state -------
     property var device: null          // selected {vpid, path, role, product, ...}
@@ -39,7 +43,6 @@ ApplicationWindow {
     function refreshDevices() {
         request("list", [], (devices, code, err) => {
             if (devices === null) {
-                // Backend missing / no matching device — keep UI alive.
                 root.backendError = err;
                 if (code === 3) { root.interfaces = []; root.device = null; }
                 return;
@@ -81,7 +84,6 @@ ApplicationWindow {
         Rectangle {
             Layout.preferredWidth: 230
             Layout.fillHeight: true
-            color: "#16161e"
 
             ColumnLayout {
                 anchors.fill: parent
@@ -90,13 +92,11 @@ ApplicationWindow {
 
                 Label {
                     text: qsTr("Keychron")
-                    color: "#e6e9f0"
                     font.pixelSize: 20
                     font.bold: true
                     Layout.bottomMargin: 4
                 }
 
-                // Device list
                 Repeater {
                     model: root.interfaces
                     delegate: DeviceButton {
@@ -111,7 +111,6 @@ ApplicationWindow {
                 Label {
                     visible: root.interfaces.length === 0
                     text: root.backendError ? root.backendError : qsTr("No devices connected")
-                    color: "#565f89"
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
@@ -120,7 +119,6 @@ ApplicationWindow {
 
                 Label {
                     text: backend.binary_path ? backend.binary_path : qsTr("backend not found")
-                    color: "#565f89"
                     font.pixelSize: 11
                     elide: Text.ElideMiddle
                     Layout.fillWidth: true
@@ -134,11 +132,9 @@ ApplicationWindow {
             Layout.fillHeight: true
             spacing: 0
 
-            // Nav bar
             TabBar {
                 id: nav
                 Layout.fillWidth: true
-                background: Rectangle { color: "#1a1b26" }
 
                 TabButton { text: qsTr("Device") }
                 TabButton { text: qsTr("Performance") }
@@ -165,7 +161,6 @@ ApplicationWindow {
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: 28
-                color: "#16161e"
                 visible: backend.busy || statusText.text !== ""
 
                 RowLayout {
@@ -181,7 +176,6 @@ ApplicationWindow {
                     Label {
                         id: statusText
                         text: backend.busy ? qsTr("Working…") : root.backendError
-                        color: root.backendError ? "#f7768e" : "#565f89"
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
@@ -198,24 +192,20 @@ ApplicationWindow {
         implicitHeight: 44
 
         background: Rectangle {
-            radius: 8
-            color: btn.selected ? "#2a2b3d" : (btn.hovered ? "#1f2033" : "transparent")
-            border.width: btn.selected ? 1 : 0
-            border.color: "#7aa2f7"
+            radius: 6
+            color: btn.selected ? palette.highlight : (btn.hovered ? palette.mid : "transparent")
         }
 
         contentItem: ColumnLayout {
             spacing: 0
             Label {
                 text: btn.dev ? btn.dev.product : ""
-                color: "#c0caf5"
                 font.bold: btn.selected
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
             Label {
                 text: btn.dev ? (btn.dev.role + " · " + btn.dev.path) : ""
-                color: "#565f89"
                 font.pixelSize: 11
                 elide: Text.ElideRight
                 Layout.fillWidth: true

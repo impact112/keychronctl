@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import "components"
 
 // Buttons: per-profile button bindings with an action picker.
 ScrollView {
@@ -38,7 +39,6 @@ ScrollView {
         Label {
             visible: !view.bindsData
             text: qsTr("No binding data — is the device connected?")
-            color: "#565f89"
         }
 
         // Profile tabs
@@ -69,13 +69,11 @@ ScrollView {
             model: view.bindsData && view.bindsData.profiles && view.bindsData.profiles.length > 0
                    ? view.bindsData.profiles[view.currentProfile].bindings : []
 
-            delegate: Rectangle {
+            delegate: ItemDelegate {
                 id: row
                 required property var modelData
                 width: bindsList.width
                 height: 40
-                radius: 6
-                color: mouseArea.containsMouse ? "#1f2033" : "transparent"
 
                 RowLayout {
                     anchors.fill: parent
@@ -85,18 +83,15 @@ ScrollView {
 
                     Label {
                         text: "[" + row.modelData.index + "]"
-                        color: "#565f89"
                         font.pixelSize: 12
                     }
                     Label {
                         text: row.modelData.key || ""
-                        color: "#c0caf5"
                         Layout.preferredWidth: 110
                     }
                     Label {
                         text: row.modelData.action +
                               (row.modelData.value ? (":" + row.modelData.value) : "")
-                        color: "#7aa2f7"
                         font.family: "monospace"
                         Layout.fillWidth: true
                     }
@@ -107,12 +102,7 @@ ScrollView {
                     }
                 }
 
-                MouseArea {
-                    id: mouseArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    onClicked: picker.openFor(row.modelData.index)
-                }
+                onClicked: picker.openFor(row.modelData.index)
             }
         }
 
@@ -121,7 +111,6 @@ ScrollView {
                      && view.bindsData.profiles.length > view.currentProfile
                      && view.bindsData.profiles[view.currentProfile].bindings.length === 0
             text: qsTr("No custom bindings on this profile")
-            color: "#565f89"
         }
 
         Item { Layout.fillHeight: true }
@@ -131,7 +120,6 @@ ScrollView {
     Popup {
         id: picker
         property int bindIndex: 0
-        property string currentAction: ""
 
         function openFor(index) {
             picker.bindIndex = index;
@@ -145,18 +133,11 @@ ScrollView {
         focus: true
         padding: 12
 
-        background: Rectangle {
-            radius: 12
-            color: "#1f2033"
-            border.color: "#565f89"
-        }
-
         contentItem: ColumnLayout {
             spacing: 8
 
             Label {
                 text: qsTr("Bind button %1").arg(picker.bindIndex)
-                color: "#e6e9f0"
                 font.bold: true
                 font.pixelSize: 15
             }
@@ -206,7 +187,7 @@ ScrollView {
                 // Keyboard combos
                 ColumnLayout {
                     spacing: 8
-                    Label { text: qsTr("Modifiers"); color: "#565f89" }
+                    Label { text: qsTr("Modifiers") }
                     Flow {
                         id: mods
                         spacing: 6
@@ -221,7 +202,7 @@ ScrollView {
                             }
                         }
                     }
-                    Label { text: qsTr("Key"); color: "#565f89" }
+                    Label { text: qsTr("Key") }
                     TextField {
                         id: keyField
                         placeholderText: qsTr("e.g. t, F5, ENTER")
