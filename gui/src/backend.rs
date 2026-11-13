@@ -50,7 +50,7 @@ pub struct BackendRust {
     pub last_error: QString,
 }
 
-#[cxx_qt::bridge(namespace = "keychron_launcher")]
+#[cxx_qt::bridge(namespace = "keychronctl_qt")]
 mod backend {
     #[namespace = ""]
     unsafe extern "C++" {

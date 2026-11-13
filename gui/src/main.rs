@@ -10,7 +10,7 @@ fn main() {
     // default prints "QQmlApplicationEngine failed to load component ..."
     // to stderr, which is our only loud failure signal.
     if let Some(engine) = engine.as_mut() {
-        engine.load(&QUrl::from("qrc:/qt/qml/io/keychron/launcher/qml/main.qml"));
+        engine.load(&QUrl::from("qrc:/qt/qml/io.keychronctl.qt/qml/main.qml"));
     }
 
     if let Some(app) = app.as_mut() {

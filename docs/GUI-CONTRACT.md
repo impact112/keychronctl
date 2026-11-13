@@ -1,6 +1,6 @@
 # GUI ↔ CLI contract
 
-The keychron-launcher GUI is **fully decoupled** from keychronctl: no
+The keychronctl-qt GUI is **fully decoupled** from keychronctl: no
 build-time dependency, no shared code, no compiled-in schema. It talks to
 *any* external binary honoring this contract.
 

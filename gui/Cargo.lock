@@ -313,7 +313,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "keychron-launcher"
+name = "keychronctl-qt"
 version = "0.1.0"
 dependencies = [
  "cxx",

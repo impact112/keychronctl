@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
-import io.keychron.launcher
+import io.keychronctl.qt
 
 ApplicationWindow {
     id: root

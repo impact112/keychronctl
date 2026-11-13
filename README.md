@@ -51,7 +51,7 @@ the official Launcher for that.
 
 ## The desktop app
 
-`gui/` contains **keychron-launcher**, a Qt6/QML app (Rust + cxx-qt). It is
+`gui/` contains **keychronctl-qt**, a Qt6/QML app (Rust + cxx-qt). It is
 fully decoupled from the CLI: it spawns `keychronctl` (or whatever binary
 `KEYCHRONCTL` points at) and talks JSON over stdio, per the contract in
 [`docs/GUI-CONTRACT.md`](docs/GUI-CONTRACT.md). A mock backend
@@ -82,7 +82,7 @@ granting access to Keychron devices (VID `3434`).
 | Path | Contents |
 |---|---|
 | `src/` | `keychronctl` CLI (Rust) |
-| `gui/` | `keychron-launcher` desktop app (Rust + cxx-qt + QML) |
+| `gui/` | `keychronctl-qt` desktop app (Rust + cxx-qt + QML) |
 | `docs/PROTOCOL.md` | reverse-engineered wire protocol spec |
 | `docs/CLI.md` | CLI design / manpage source |
 | `docs/GUI-CONTRACT.md` | GUI ↔ CLI subprocess contract |
