@@ -1432,11 +1432,21 @@ fn mouse_context(
             return Err(exit_runtime());
         }
     };
-    // Paired mouse vpid from the bond list.
+    // Paired mouse vpid from the bond list. The bond list is answered by a
+    // receiver (dongle); a wired mouse has no receiver, so the query fails
+    // and the interface's own vpid identifies the mouse directly. A bond
+    // list that answers with no active slot means the receiver's mouse is
+    // unreachable — keep the pairing error for that case.
     let vpid = match api.open_path(&path) {
         Ok(dev) => match mouse::query_8k_bond_list(dev, false) {
-            Ok(bonded) => bonded.iter().find(|b| b.active).map(|b| b.vpid),
-            Err(_) => None,
+            Ok(bonded) => match bonded.iter().find(|b| b.active) {
+                Some(b) => Some(b.vpid),
+                None => {
+                    eprintln!("error: no paired mouse found on the receiver");
+                    return Err(exit_no_device());
+                }
+            },
+            Err(_) => Some(iface.vpid),
         },
         Err(e) => {
             eprintln!("error: cannot open {}: {e}", iface.path);
