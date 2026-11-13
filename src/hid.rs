@@ -87,19 +87,29 @@ pub fn list_interfaces(api: &HidApi) -> Vec<InterfaceInfo> {
             }
         })
         .collect();
-    out.sort_by(|a, b| a.vpid.cmp(&b.vpid).then(a.role.as_str().cmp(b.role.as_str())));
+    out.sort_by(|a, b| {
+        a.vpid
+            .cmp(&b.vpid)
+            .then(a.role.as_str().cmp(b.role.as_str()))
+    });
     out
 }
 
 /// Parse a device selector: decimal/hex vpid, `VID:PID`, or a hidraw path.
-pub fn match_selector<'a>(spec: &str, interfaces: &'a [InterfaceInfo]) -> Option<&'a InterfaceInfo> {
+pub fn match_selector<'a>(
+    spec: &str,
+    interfaces: &'a [InterfaceInfo],
+) -> Option<&'a InterfaceInfo> {
     match_selector_all(spec, interfaces).into_iter().next()
 }
 
 /// All interfaces matching a selector. A single hidraw node can expose several
 /// roles (e.g. the Link-KM dongle carries `bridge` and `mouse-8k` on the same
 /// node), so callers pick among the matches by role priority.
-pub fn match_selector_all<'a>(spec: &str, interfaces: &'a [InterfaceInfo]) -> Vec<&'a InterfaceInfo> {
+pub fn match_selector_all<'a>(
+    spec: &str,
+    interfaces: &'a [InterfaceInfo],
+) -> Vec<&'a InterfaceInfo> {
     let spec_lower = spec.to_ascii_lowercase();
     let parse_hex = |s: &str| u16::from_str_radix(s.trim_start_matches("0x"), 16).ok();
     let _ = spec_lower;
@@ -114,7 +124,10 @@ pub fn match_selector_all<'a>(spec: &str, interfaces: &'a [InterfaceInfo]) -> Ve
 
     if let Some((vid_s, pid_s)) = spec.split_once(':') {
         if let (Some(vid), Some(pid)) = (parse_hex(vid_s), parse_hex(pid_s)) {
-            return interfaces.iter().filter(|i| i.vid == vid && i.pid == pid).collect();
+            return interfaces
+                .iter()
+                .filter(|i| i.vid == vid && i.pid == pid)
+                .collect();
         }
     }
 

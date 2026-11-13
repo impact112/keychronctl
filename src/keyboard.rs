@@ -78,7 +78,10 @@ pub fn query_info(dev: HidDevice, verbose: bool) -> Result<KeyboardInfo, Protoco
     let resp = t.request(&[CMD_GET_PROTOCOL_VERSION], CMD_GET_PROTOCOL_VERSION)?;
     if resp.len() < 3 {
         return Err(ProtocolError {
-            message: format!("short protocol version response: {}", crate::transceiver::hex(&resp)),
+            message: format!(
+                "short protocol version response: {}",
+                crate::transceiver::hex(&resp)
+            ),
         });
     }
     info.protocol_version = Some(resp[2]);
@@ -116,7 +119,10 @@ pub fn query_info(dev: HidDevice, verbose: bool) -> Result<KeyboardInfo, Protoco
 pub fn parse_features_v4(resp: &[u8]) -> Result<FeatureFlags, ProtocolError> {
     if resp.len() < 9 {
         return Err(ProtocolError {
-            message: format!("short support-feature response: {}", crate::transceiver::hex(resp)),
+            message: format!(
+                "short support-feature response: {}",
+                crate::transceiver::hex(resp)
+            ),
         });
     }
     let feature1 = ((resp[4] as u16) << 8) | resp[3] as u16;
@@ -256,7 +262,7 @@ mod tests {
         assert!(!f.upload_default_layer); // bit 12
         assert!(!f.performance_mode); // bit 17
         assert!(!f.latch); // bit 18
-        // Short response errors instead of panicking.
+                           // Short response errors instead of panicking.
         assert!(parse_features_v4(&[0xA2, 0, 0]).is_err());
     }
 
@@ -280,7 +286,7 @@ mod tests {
         assert!(!f.snap); // bit 6
         assert!(f.bootloader_jump); // byte2 bit 3, instruction set 2 allowed
         assert!(!f.performance_mode); // byte2 bit 0 set, but instruction set == 2
-        // Same bytes with instruction set 4: performance_mode now allowed.
+                                      // Same bytes with instruction set 4: performance_mode now allowed.
         let f = parse_features_v2(&resp, 4).unwrap();
         assert!(f.performance_mode);
         assert!(f.bootloader_jump);
@@ -296,7 +302,7 @@ mod tests {
         assert!(!f.get_default_layer); // 0xAA bit 0 clear
         assert!(f.performance_mode); // 0x8F bit 0, instruction set != 2
         assert!(!f.bootloader_jump); // 0x8F bit 3 set, but instruction set 1
-        // Unknown instruction set errors on missing bytes.
+                                     // Unknown instruction set errors on missing bytes.
         assert!(parse_features_v2(&[0xA2], 5).is_err());
     }
 

@@ -98,13 +98,20 @@ pub fn query_8k_version(dev: HidDevice, verbose: bool) -> Result<MouseInfo, Prot
     t.verbose = verbose;
     let resp = t.request(&[2], 2)?;
     if resp.len() < 12 {
-        return Err(ProtocolError { message: format!("short 8k version response: {} bytes", resp.len()) });
+        return Err(ProtocolError {
+            message: format!("short 8k version response: {} bytes", resp.len()),
+        });
     }
     let mut info = MouseInfo {
         protocol: "8k".into(),
         vid: Some((resp[4] as u16) << 8 | resp[3] as u16),
         pid: Some((resp[6] as u16) << 8 | resp[5] as u16),
-        version: Some(format!("{}.{}.{}", resp[8], (resp[7] >> 4) & 0x0F, resp[7] & 0x0F)),
+        version: Some(format!(
+            "{}.{}.{}",
+            resp[8],
+            (resp[7] >> 4) & 0x0F,
+            resp[7] & 0x0F
+        )),
         version_code: Some((resp[2] as u32) << 8 | resp[1] as u32),
         work_mode: Some(work_mode_name(resp[9] & 0x07)),
         battery_percent: None,
@@ -121,12 +128,17 @@ pub fn query_8k_version(dev: HidDevice, verbose: bool) -> Result<MouseInfo, Prot
 
 /// 8K receiver state: cmd 3 on reportId 181. Three fixed 5-byte slots
 /// (kb1, kb2, mouse): [vidLo, vidHi, pidLo, pidHi, state]; state==1 = active.
-pub fn query_8k_bond_list(dev: HidDevice, verbose: bool) -> Result<Vec<BondedDevice>, ProtocolError> {
+pub fn query_8k_bond_list(
+    dev: HidDevice,
+    verbose: bool,
+) -> Result<Vec<BondedDevice>, ProtocolError> {
     let mut t = Transceiver::new(dev, REPORT_8K_VERSION, SMALL_BUF);
     t.verbose = verbose;
     let resp = t.request(&[3], 3)?;
     if resp.len() < 17 {
-        return Err(ProtocolError { message: format!("short bond-list response: {} bytes", resp.len()) });
+        return Err(ProtocolError {
+            message: format!("short bond-list response: {} bytes", resp.len()),
+        });
     }
     let slots = [("slot1", 2usize), ("slot2", 7), ("slot3", 12)];
     let mut out = Vec::new();
@@ -248,7 +260,11 @@ pub fn query_8k_dpi(dev: HidDevice, verbose: bool) -> Result<DpiInfo, ProtocolEr
             (resp[14] as u16) << 8 | resp[13] as u16,
         ],
         level_val_max: if max == 0 { None } else { Some(max) },
-        level_val_step: if resp[42] == 0 { None } else { Some(resp[42] as u16) },
+        level_val_step: if resp[42] == 0 {
+            None
+        } else {
+            Some(resp[42] as u16)
+        },
         raw: vec![crate::transceiver::hex(&resp)],
     })
 }
@@ -265,17 +281,27 @@ pub fn query_nordic_version(dev: HidDevice, verbose: bool) -> Result<MouseInfo, 
     nordic_checksum(&mut payload);
     let resp = t.request(&payload, 0x81)?;
     if resp.len() < 10 {
-        return Err(ProtocolError { message: format!("short nordic version response: {} bytes", resp.len()) });
+        return Err(ProtocolError {
+            message: format!("short nordic version response: {} bytes", resp.len()),
+        });
     }
     let status_ok = (resp[0] == 0 || resp[0] == 64) && resp[3] == 0;
     if !status_ok {
         return Err(ProtocolError {
-            message: format!("nordic version response status mismatch: {}", crate::transceiver::hex(&resp)),
+            message: format!(
+                "nordic version response status mismatch: {}",
+                crate::transceiver::hex(&resp)
+            ),
         });
     }
     Ok(MouseInfo {
         protocol: "4k/8k_nordic".into(),
-        version: Some(format!("{}.{}.{}", resp[9], (resp[8] >> 4) & 0x0F, resp[8] & 0x0F)),
+        version: Some(format!(
+            "{}.{}.{}",
+            resp[9],
+            (resp[8] >> 4) & 0x0F,
+            resp[8] & 0x0F
+        )),
         work_mode: Some(work_mode_name(1)),
         raw: vec![crate::transceiver::hex(&resp)],
         ..Default::default()
@@ -285,18 +311,28 @@ pub fn query_nordic_version(dev: HidDevice, verbose: bool) -> Result<MouseInfo, 
 /// 1k base info over an older receiver (feature-report path, `_Y`
 /// transceiver): cmd 6 on feature report 81. Battery: value = r[10],
 /// state = 3 & r[11].
-pub fn query_1k_feature_base_info(dev: HidDevice, verbose: bool) -> Result<MouseInfo, ProtocolError> {
+pub fn query_1k_feature_base_info(
+    dev: HidDevice,
+    verbose: bool,
+) -> Result<MouseInfo, ProtocolError> {
     let mut t = Transceiver::new(dev, REPORT_1K, SMALL_BUF);
     t.verbose = verbose;
     let resp = t.feature_request(&[6], 6)?;
     if resp.len() < 12 {
-        return Err(ProtocolError { message: format!("short 1k base-info response: {} bytes", resp.len()) });
+        return Err(ProtocolError {
+            message: format!("short 1k base-info response: {} bytes", resp.len()),
+        });
     }
     Ok(MouseInfo {
         protocol: "1k".into(),
         vid: Some((resp[4] as u16) << 8 | resp[3] as u16),
         pid: Some((resp[6] as u16) << 8 | resp[5] as u16),
-        version: Some(format!("{}.{}.{}", resp[8], (resp[7] >> 4) & 0x0F, resp[7] & 0x0F)),
+        version: Some(format!(
+            "{}.{}.{}",
+            resp[8],
+            (resp[7] >> 4) & 0x0F,
+            resp[7] & 0x0F
+        )),
         version_code: Some((resp[2] as u32) << 8 | resp[1] as u32),
         work_mode: Some(work_mode_name(resp[9])),
         battery_percent: Some(resp[10]),
@@ -455,7 +491,9 @@ fn funkey_get_all_indexes(dev: HidDevice, verbose: bool) -> Result<Vec<u8>, Prot
     t.verbose = verbose;
     let resp = t.request(&[97], 97)?;
     if resp.len() < 2 {
-        return Err(ProtocolError { message: "short funkey get-all response".into() });
+        return Err(ProtocolError {
+            message: "short funkey get-all response".into(),
+        });
     }
     let count = resp[1] as usize;
     let mut rest = &resp[2..];
@@ -477,12 +515,18 @@ fn funkey_get_all_indexes(dev: HidDevice, verbose: bool) -> Result<Vec<u8>, Prot
 
 /// Get one button binding (cmd 98 on reportId 179): `[98, keyIndex]` →
 /// `[98, keyIndex, ?, type, data...]`.
-pub fn query_8k_funkey(dev: HidDevice, index: u8, verbose: bool) -> Result<FunKeyBinding, ProtocolError> {
+pub fn query_8k_funkey(
+    dev: HidDevice,
+    index: u8,
+    verbose: bool,
+) -> Result<FunKeyBinding, ProtocolError> {
     let mut t = Transceiver::new(dev, REPORT_8K_FUNKEYS, FUNKEYS_BUF);
     t.verbose = verbose;
     let resp = t.request(&[98, index], 98)?;
     if resp.len() < 4 {
-        return Err(ProtocolError { message: format!("short funkey get response: {} bytes", resp.len()) });
+        return Err(ProtocolError {
+            message: format!("short funkey get response: {} bytes", resp.len()),
+        });
     }
     let ftype = resp[3];
     let data = resp[4..].to_vec();
@@ -496,19 +540,48 @@ pub fn query_8k_funkey(dev: HidDevice, index: u8, verbose: bool) -> Result<FunKe
 
 /// HID keyboard usage ID → printable name (for keyboard-binding display).
 pub fn hid_key_name(code: u8) -> Option<&'static str> {
-    const LETTERS: [&str; 26] = ["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z"];
-    const DIGITS: [&str; 10] = ["1","2","3","4","5","6","7","8","9","0"];
+    const LETTERS: [&str; 26] = [
+        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r",
+        "s", "t", "u", "v", "w", "x", "y", "z",
+    ];
+    const DIGITS: [&str; 10] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
     Some(match code {
         4..=29 => LETTERS[(code - 4) as usize],
         30..=39 => DIGITS[(code - 30) as usize],
-        40 => "enter", 41 => "esc", 42 => "backspace", 43 => "tab", 44 => "space",
-        45 => "-", 46 => "=", 47 => "[", 48 => "]", 49 => "\\", 50 => ";", 51 => "'",
-        52 => "`", 53 => ",", 54 => ".", 55 => "/", 57 => "capslock",
-        58..=69 => return Some(match code {
-            58 => "f1", 59 => "f2", 60 => "f3", 61 => "f4", 62 => "f5", 63 => "f6",
-            64 => "f7", 65 => "f8", 66 => "f9", 67 => "f10", 68 => "f11", 69 => "f12",
-            _ => unreachable!(),
-        }),
+        40 => "enter",
+        41 => "esc",
+        42 => "backspace",
+        43 => "tab",
+        44 => "space",
+        45 => "-",
+        46 => "=",
+        47 => "[",
+        48 => "]",
+        49 => "\\",
+        50 => ";",
+        51 => "'",
+        52 => "`",
+        53 => ",",
+        54 => ".",
+        55 => "/",
+        57 => "capslock",
+        58..=69 => {
+            return Some(match code {
+                58 => "f1",
+                59 => "f2",
+                60 => "f3",
+                61 => "f4",
+                62 => "f5",
+                63 => "f6",
+                64 => "f7",
+                65 => "f8",
+                66 => "f9",
+                67 => "f10",
+                68 => "f11",
+                69 => "f12",
+                _ => unreachable!(),
+            })
+        }
         _ => return None,
     })
 }
@@ -518,7 +591,9 @@ fn decode_funkey_value(ftype: u8, data: &[u8]) -> Option<String> {
     let u24 = |d: &[u8]| ((d[0] as u32) << 16) | ((d[1] as u32) << 8) | d[2] as u32;
     match ftype {
         FK_MOUSE if data.len() >= 3 => Some(
-            basic_key_name(u24(data)).map(|s| s.to_string()).unwrap_or_else(|| format!("0x{:06X}", u24(data))),
+            basic_key_name(u24(data))
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("0x{:06X}", u24(data))),
         ),
         FK_KEYBOARD if !data.is_empty() => {
             let mut parts = Vec::new();
@@ -529,21 +604,35 @@ fn decode_funkey_value(ftype: u8, data: &[u8]) -> Option<String> {
             }
             for k in data.iter().skip(1) {
                 if *k != 0 {
-                    parts.push(hid_key_name(*k).map(|s| s.to_string()).unwrap_or_else(|| format!("KC_{k:02X}")));
+                    parts.push(
+                        hid_key_name(*k)
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("KC_{k:02X}")),
+                    );
                 }
             }
             Some(parts.join("+"))
         }
         FK_MEDIA if data.len() >= 2 => {
             let v = (data[1] as u16) << 8 | data[0] as u16;
-            Some(media_key_name(v).map(|s| s.to_string()).unwrap_or_else(|| format!("{v}")))
+            Some(
+                media_key_name(v)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("{v}")),
+            )
         }
-        FK_DPI | FK_POLLING_RATE if !data.is_empty() => {
-            Some(loop_key_name(data[0]).map(|s| s.to_string()).unwrap_or_else(|| format!("{}", data[0])))
-        }
+        FK_DPI | FK_POLLING_RATE if !data.is_empty() => Some(
+            loop_key_name(data[0])
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("{}", data[0])),
+        ),
         FK_SHORTCUT if data.len() >= 3 => {
             let v = u24(data);
-            Some(shortcut_key_name(v).map(|s| s.to_string()).unwrap_or_else(|| format!("0x{v:06X}")))
+            Some(
+                shortcut_key_name(v)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("0x{v:06X}")),
+            )
         }
         FK_PROFILE if !data.is_empty() => Some(format!("{}", data[0])),
         FK_LIGHT if !data.is_empty() => Some(format!("{}", data[0])),
@@ -569,10 +658,14 @@ pub fn set_8k_funkey(
     let resp = t.request(&payload, 0xE4)?;
     // Ack echo: [0xE4, status, cmd]; status 0 = ok.
     if resp.len() < 3 || resp[2] != 82 {
-        return Err(ProtocolError { message: "funkey set ack mismatch".into() });
+        return Err(ProtocolError {
+            message: "funkey set ack mismatch".into(),
+        });
     }
     if resp[1] != 0 {
-        return Err(ProtocolError { message: format!("funkey set rejected (status {})", resp[1]) });
+        return Err(ProtocolError {
+            message: format!("funkey set rejected (status {})", resp[1]),
+        });
     }
     Ok(())
 }
@@ -630,23 +723,38 @@ pub struct ProfileInfo {
 pub fn query_8k_profile(dev: HidDevice, verbose: bool) -> Result<ProfileInfo, ProtocolError> {
     let resp = query_8k_settings(dev, verbose)?;
     if resp.len() <= 50 {
-        return Err(ProtocolError { message: "settings snapshot too short for profile info".into() });
+        return Err(ProtocolError {
+            message: "settings snapshot too short for profile info".into(),
+        });
     }
-    Ok(ProfileInfo { protocol: "8k", current: resp[1], count: resp[50] })
+    Ok(ProfileInfo {
+        protocol: "8k",
+        current: resp[1],
+        count: resp[50],
+    })
 }
 
 /// Switch to `profile` (passing `count` = current profile count), or change
 /// the profile count (`profile` = an index < count, `count` = new count).
 /// Ack: `[0xE4, 0, 14]`.
-pub fn set_8k_profile(dev: HidDevice, profile: u8, count: u8, verbose: bool) -> Result<(), ProtocolError> {
+pub fn set_8k_profile(
+    dev: HidDevice,
+    profile: u8,
+    count: u8,
+    verbose: bool,
+) -> Result<(), ProtocolError> {
     let mut t = Transceiver::new(dev, REPORT_8K_VERSION, SMALL_BUF);
     t.verbose = verbose;
     let resp = t.request(&[14, profile, count], 0xE4)?;
     if resp.len() < 3 || resp[2] != 14 {
-        return Err(ProtocolError { message: "profile set ack mismatch".into() });
+        return Err(ProtocolError {
+            message: "profile set ack mismatch".into(),
+        });
     }
     if resp[1] != 0 {
-        return Err(ProtocolError { message: format!("profile set rejected (status {})", resp[1]) });
+        return Err(ProtocolError {
+            message: format!("profile set rejected (status {})", resp[1]),
+        });
     }
     Ok(())
 }
@@ -774,7 +882,11 @@ pub fn query_8k_snapshot(dev: HidDevice, verbose: bool) -> Result<SettingsSnapsh
         sleep_minutes: r[18],
         battery_percent: 127 & r[19],
         charging: (r[19] >> 7) & 1 == 1,
-        scroll: ScrollInfo { speed: r[27], inertia: r[28], spl: r[29] },
+        scroll: ScrollInfo {
+            speed: r[27],
+            inertia: r[28],
+            spl: r[29],
+        },
         feature1: r[26],
         color_materials: [r[57], r[58], r[59]],
     })
@@ -855,11 +967,7 @@ pub fn set_8k_polling_rate(
 /// fps20k+1, angleEnable?2:0, angle, lodLevel]`. The sensor bytes hold
 /// "off markers" (2) rather than plain booleans on some firmwares, matching
 /// the launcher's `|| 2` defaults.
-pub fn set_8k_sensor(
-    dev: HidDevice,
-    s: &SysFeatures,
-    verbose: bool,
-) -> Result<(), ProtocolError> {
+pub fn set_8k_sensor(dev: HidDevice, s: &SysFeatures, verbose: bool) -> Result<(), ProtocolError> {
     let p = vec![
         66u8,
         s.lod,
@@ -887,7 +995,13 @@ pub fn set_8k_debounce(dev: HidDevice, ms: u8, verbose: bool) -> Result<(), Prot
 
 /// Set the scroll-wheel parameters (cmd 69, reportId 181, launcher class
 /// `dr.set`): `[69, speed, inertia, spl]`.
-pub fn set_8k_scroll(dev: HidDevice, speed: u8, inertia: u8, spl: u8, verbose: bool) -> Result<(), ProtocolError> {
+pub fn set_8k_scroll(
+    dev: HidDevice,
+    speed: u8,
+    inertia: u8,
+    spl: u8,
+    verbose: bool,
+) -> Result<(), ProtocolError> {
     ack_command(dev, &[69, speed, inertia, spl], 69, verbose)?;
     Ok(())
 }
@@ -900,13 +1014,20 @@ pub fn get_8k_sleep(dev: HidDevice, verbose: bool) -> Result<u8, ProtocolError> 
     t.verbose = verbose;
     let resp = t.request(&[10, 2], 10)?;
     if resp.len() < 3 {
-        return Err(ProtocolError { message: "short sleep response".into() });
+        return Err(ProtocolError {
+            message: "short sleep response".into(),
+        });
     }
     Ok(resp[2])
 }
 
 pub fn set_8k_sleep(dev: HidDevice, minutes: u8, verbose: bool) -> Result<(), ProtocolError> {
-    ack_command(dev, &[10, 1, if minutes == 0 { 255 } else { minutes }], 10, verbose)?;
+    ack_command(
+        dev,
+        &[10, 1, if minutes == 0 { 255 } else { minutes }],
+        10,
+        verbose,
+    )?;
     Ok(())
 }
 
@@ -927,7 +1048,9 @@ pub fn query_8k_light(dev: HidDevice, verbose: bool) -> Result<LightInfo, Protoc
     t.verbose = verbose;
     let resp = t.request(&[35], 33)?;
     if resp.len() < 7 {
-        return Err(ProtocolError { message: "short lighting response".into() });
+        return Err(ProtocolError {
+            message: "short lighting response".into(),
+        });
     }
     Ok(LightInfo {
         protocol: "8k",
@@ -957,7 +1080,9 @@ pub fn set_8k_light(
     std::thread::sleep(std::time::Duration::from_millis(100));
     let resp = t.read_expect(33, t.timeout)?;
     if resp.len() < 7 {
-        return Err(ProtocolError { message: "short lighting response".into() });
+        return Err(ProtocolError {
+            message: "short lighting response".into(),
+        });
     }
     Ok(LightInfo {
         protocol: "8k",

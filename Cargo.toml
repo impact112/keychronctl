@@ -3,7 +3,7 @@ name = "keychronctl"
 version = "0.1.0"
 edition = "2021"
 description = "Configure Keychron keyboards, mice, and receivers over USB HID"
-license = "MIT"
+license = "GPL-3.0-only"
 
 [dependencies]
 hidapi = "2"

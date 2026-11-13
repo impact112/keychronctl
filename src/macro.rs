@@ -118,12 +118,8 @@ pub fn encode_macro_v11(macros: &[Vec<MacroItem>]) -> Vec<u8> {
     for items in macros {
         for item in items {
             match item {
-                MacroItem::Tap(c) => {
-                    buf.extend_from_slice(&[0x01, ITEM_TAP, code_byte(*c)])
-                }
-                MacroItem::Down(c) => {
-                    buf.extend_from_slice(&[0x01, ITEM_DOWN, code_byte(*c)])
-                }
+                MacroItem::Tap(c) => buf.extend_from_slice(&[0x01, ITEM_TAP, code_byte(*c)]),
+                MacroItem::Down(c) => buf.extend_from_slice(&[0x01, ITEM_DOWN, code_byte(*c)]),
                 MacroItem::Up(c) => buf.extend_from_slice(&[0x01, ITEM_UP, code_byte(*c)]),
                 MacroItem::Delay(ms) => {
                     buf.extend_from_slice(&[0x01, ITEM_DELAY]);
@@ -446,7 +442,11 @@ fn parse_braced(inner: &str) -> Result<Vec<MacroItem>, ProtocolError> {
 /// text at this position is plain.
 fn match_special(s: &[char]) -> Result<Option<(usize, Vec<MacroItem>)>, ProtocolError> {
     // MEDIA:name
-    if s.len() >= 6 && s[..5].iter().collect::<String>().eq_ignore_ascii_case("media")
+    if s.len() >= 6
+        && s[..5]
+            .iter()
+            .collect::<String>()
+            .eq_ignore_ascii_case("media")
         && s[5] == ':'
     {
         let name: String = s[6..]
@@ -530,7 +530,11 @@ pub fn keycode_by_name(name: &str) -> Option<u16> {
             return Some(4 + c as u16 - 'A' as u16);
         }
         if c.is_ascii_digit() {
-            return Some(if c == '0' { 39 } else { 30 + c as u16 - '1' as u16 });
+            return Some(if c == '0' {
+                39
+            } else {
+                30 + c as u16 - '1' as u16
+            });
         }
         return None;
     }
@@ -701,7 +705,10 @@ mod tests {
         assert_eq!(encode_macro_v9(&macros), vec![0x68, 0x69, 0x00]);
 
         let macros = vec![vec![MacroItem::Tap(4)], vec![MacroItem::Tap(5)]];
-        assert_eq!(encode_macro_v9(&macros), vec![0x01, 0x04, 0x00, 0x01, 0x05, 0x00]);
+        assert_eq!(
+            encode_macro_v9(&macros),
+            vec![0x01, 0x04, 0x00, 0x01, 0x05, 0x00]
+        );
     }
 
     // Keycodes are truncated to the low byte by the launcher's Uint8Array
@@ -750,11 +757,7 @@ mod tests {
         // Modifiers: CTRL+c -> down CTRL, tap c, up CTRL.
         assert_eq!(
             parse_macro("CTRL+c").unwrap(),
-            vec![
-                MacroItem::Down(224),
-                MacroItem::Tap(6),
-                MacroItem::Up(224)
-            ]
+            vec![MacroItem::Down(224), MacroItem::Tap(6), MacroItem::Up(224)]
         );
         // Stacked modifiers release in reverse order.
         assert_eq!(
@@ -768,8 +771,14 @@ mod tests {
             ]
         );
         // Media: MEDIA:play -> KC_MPLY (174).
-        assert_eq!(parse_macro("MEDIA:play").unwrap(), vec![MacroItem::Tap(174)]);
-        assert_eq!(parse_macro("MEDIA:next").unwrap(), vec![MacroItem::Tap(171)]);
+        assert_eq!(
+            parse_macro("MEDIA:play").unwrap(),
+            vec![MacroItem::Tap(174)]
+        );
+        assert_eq!(
+            parse_macro("MEDIA:next").unwrap(),
+            vec![MacroItem::Tap(171)]
+        );
         // Braced keys: {ENTER} tap, {+SHIFT} down, {-SHIFT} up.
         assert_eq!(parse_macro("{ENTER}").unwrap(), vec![MacroItem::Tap(40)]);
         assert_eq!(parse_macro("{+SHIFT}").unwrap(), vec![MacroItem::Down(225)]);
@@ -803,7 +812,10 @@ mod tests {
         // The 0x0F response must echo the request byte-for-byte
         // (launcher uint8ArrayEquals, module 50993 lines 45236/45261).
         let req = [0x0F, 0x00, 0x00, 0x03, 0x61, 0x62, 0x63];
-        assert!(echo_matches(&req, &[0x0F, 0x00, 0x00, 0x03, 0x61, 0x62, 0x63]));
+        assert!(echo_matches(
+            &req,
+            &[0x0F, 0x00, 0x00, 0x03, 0x61, 0x62, 0x63]
+        ));
         // A full 32-byte echo (zero-padded like the outgoing report) matches.
         let mut full = req.to_vec();
         full.resize(32, 0);
@@ -816,7 +828,10 @@ mod tests {
         assert!(!echo_matches(&req, &[0x0F, 0x00, 0x00, 0x03, 0x61, 0x62]));
         // Short response fails; wrong command id fails.
         assert!(!echo_matches(&req, &[0x0F, 0x00, 0x00]));
-        assert!(!echo_matches(&req, &[0x0E, 0x00, 0x00, 0x03, 0x61, 0x62, 0x63]));
+        assert!(!echo_matches(
+            &req,
+            &[0x0E, 0x00, 0x00, 0x03, 0x61, 0x62, 0x63]
+        ));
     }
 
     #[test]

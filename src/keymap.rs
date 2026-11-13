@@ -94,7 +94,10 @@ pub fn decode_keycodes(resp: &[u8], keys: usize) -> Result<Vec<u16>, ProtocolErr
 /// Layer count — `DYNAMIC_KEYMAP_GET_LAYER_COUNT` (0x11), response
 /// `[0x11, count]` (docs/PROTOCOL.md §3.1).
 pub fn layer_count(t: &Transceiver) -> Result<u8, ProtocolError> {
-    let resp = t.request(&[CMD_DYNAMIC_KEYMAP_GET_LAYER_COUNT], CMD_DYNAMIC_KEYMAP_GET_LAYER_COUNT)?;
+    let resp = t.request(
+        &[CMD_DYNAMIC_KEYMAP_GET_LAYER_COUNT],
+        CMD_DYNAMIC_KEYMAP_GET_LAYER_COUNT,
+    )?;
     if resp.len() < 2 {
         return Err(ProtocolError {
             message: format!("short layer-count response: {}", hex(&resp)),
@@ -159,12 +162,7 @@ pub fn keymap_buffer_read(
 /// appends the big-endian keycode at bytes 4–5 (symmetric with 0x05, which
 /// the launcher sends as `[0x05, layer, row, col, code>>8, code&0xFF]`,
 /// module 50993 line 45425).
-pub fn keycode_get(
-    t: &Transceiver,
-    layer: u8,
-    row: u8,
-    col: u8,
-) -> Result<u16, ProtocolError> {
+pub fn keycode_get(t: &Transceiver, layer: u8, row: u8, col: u8) -> Result<u16, ProtocolError> {
     let req = [CMD_DYNAMIC_KEYMAP_GET_KEYCODE, layer, row, col];
     let resp = t.request(&req, CMD_DYNAMIC_KEYMAP_GET_KEYCODE)?;
     if resp.len() < 6 {
@@ -198,7 +196,10 @@ pub fn keycode_set(
 
 /// Reset the entire keymap — `DYNAMIC_KEYMAP_CLEAR_ALL` (0x06).
 pub fn keymap_clear(t: &Transceiver) -> Result<(), ProtocolError> {
-    t.request(&[CMD_DYNAMIC_KEYMAP_CLEAR_ALL], CMD_DYNAMIC_KEYMAP_CLEAR_ALL)?;
+    t.request(
+        &[CMD_DYNAMIC_KEYMAP_CLEAR_ALL],
+        CMD_DYNAMIC_KEYMAP_CLEAR_ALL,
+    )?;
     Ok(())
 }
 

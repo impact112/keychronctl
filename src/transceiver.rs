@@ -54,7 +54,11 @@ impl Transceiver {
                     if message.contains("timeout") && attempt < self.retries =>
                 {
                     if self.verbose {
-                        eprintln!("[trace] timeout on 0x{expect:02X}, retry {}/{}", attempt + 1, self.retries);
+                        eprintln!(
+                            "[trace] timeout on 0x{expect:02X}, retry {}/{}",
+                            attempt + 1,
+                            self.retries
+                        );
                     }
                     continue;
                 }
@@ -104,7 +108,9 @@ impl Transceiver {
             match self.device.send_feature_report(&buf) {
                 Ok(_) => {}
                 Err(e) => {
-                    return Err(ProtocolError { message: format!("feature write failed: {e}") });
+                    return Err(ProtocolError {
+                        message: format!("feature write failed: {e}"),
+                    });
                 }
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -133,7 +139,11 @@ impl Transceiver {
             };
             let _ = n;
             if attempt < self.retries && self.verbose {
-                eprintln!("[trace] feature request retry {}/{}", attempt + 1, self.retries);
+                eprintln!(
+                    "[trace] feature request retry {}/{}",
+                    attempt + 1,
+                    self.retries
+                );
             }
         }
         Err(ProtocolError {
@@ -147,15 +157,21 @@ impl Transceiver {
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                return Err(ProtocolError { message: "timeout".into() });
+                return Err(ProtocolError {
+                    message: "timeout".into(),
+                });
             }
             let mut raw = [0u8; 256];
             let n = self
                 .device
                 .read_timeout(&mut raw, remaining.as_millis() as i32)
-                .map_err(|e| ProtocolError { message: format!("HID read failed: {e}") })?;
+                .map_err(|e| ProtocolError {
+                    message: format!("HID read failed: {e}"),
+                })?;
             if n == 0 {
-                return Err(ProtocolError { message: "timeout".into() });
+                return Err(ProtocolError {
+                    message: "timeout".into(),
+                });
             }
             // Numbered-report devices (report_id != 0): hidraw read() includes the
             // IN report ID as byte 0, which may differ from our OUT report ID
@@ -180,5 +196,9 @@ impl Transceiver {
 }
 
 pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ")
+    bytes
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }

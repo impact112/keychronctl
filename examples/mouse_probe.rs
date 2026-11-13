@@ -8,16 +8,18 @@
 
 #![allow(dead_code)] // includes the whole mouse module; only part is used here
 
-#[path = "../src/transceiver.rs"]
-mod transceiver;
 #[path = "../src/mouse.rs"]
 mod mouse;
+#[path = "../src/transceiver.rs"]
+mod transceiver;
 
 use hidapi::HidApi;
 use std::ffi::CString;
 
 fn main() {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "/dev/hidraw3".to_string());
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/dev/hidraw3".to_string());
     let api = HidApi::new().expect("hidapi init failed");
     let cpath = CString::new(path.clone()).expect("device path contains NUL");
 

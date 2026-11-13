@@ -54,7 +54,11 @@ impl fmt::Display for DefinitionError {
             DefinitionError::Http(m) => write!(f, "network error: {m}"),
             DefinitionError::Parse(m) => write!(f, "invalid definition JSON: {m}"),
             DefinitionError::NotCached { vpid, path } => {
-                write!(f, "no cached definition for vpid {vpid} in {}", path.display())
+                write!(
+                    f,
+                    "no cached definition for vpid {vpid} in {}",
+                    path.display()
+                )
             }
             DefinitionError::UnknownDevice(vpid) => write!(f, "unknown device vpid {vpid}"),
         }
@@ -506,7 +510,12 @@ fn read_cached(cache_dir: &Path, vpid: u32, names: &[String]) -> Option<Definiti
 }
 
 /// Store the fetched definition under the filename it was fetched as.
-fn store_cached(cache_dir: &Path, vpid: u32, name: &str, body: &str) -> Result<(), DefinitionError> {
+fn store_cached(
+    cache_dir: &Path,
+    vpid: u32,
+    name: &str,
+    body: &str,
+) -> Result<(), DefinitionError> {
     let dir = cache_dir.join("device").join(vpid.to_string());
     std::fs::create_dir_all(&dir)
         .map_err(|e| DefinitionError::Io(format!("create {}: {e}", dir.display())))?;
@@ -736,7 +745,9 @@ mod tests {
         assert_eq!(kb.custom_keycodes.len(), 11);
         assert_eq!(
             kb.custom_keycodes[0],
-            parse::<CustomKeycode>(r#"{"name":"Mission Control","title":"Mission Control in macOS","shortName":"MCtrl"}"#)
+            parse::<CustomKeycode>(
+                r#"{"name":"Mission Control","title":"Mission Control in macOS","shortName":"MCtrl"}"#
+            )
         );
         assert_eq!(kb.keycodes, vec!["qmk_lighting"]);
         // v3 lighting lives in `menus`, not `lighting`.
@@ -750,7 +761,10 @@ mod tests {
         assert!(layouts.option_keys.is_empty());
         assert_eq!(layouts.keys.len(), 82);
         let k0 = &layouts.keys[0];
-        assert_eq!((k0.row, k0.col, k0.x, k0.y, k0.w, k0.h), (0, Some(0), 0.0, 0.0, 1.0, 1.0));
+        assert_eq!(
+            (k0.row, k0.col, k0.x, k0.y, k0.w, k0.h),
+            (0, Some(0), 0.0, 0.0, 1.0, 1.0)
+        );
         assert_eq!(k0.color.as_deref(), Some("accent"));
         assert!(!k0.d);
         // Q1 keys carry r/rx/ry explicitly; no w2/h2/x2/y2, url, ei or wheel.
@@ -794,7 +808,10 @@ mod tests {
         assert_eq!(layouts.keys.len(), 71);
         // `url` is a rendering-only field → lands in the catch-all.
         let k0 = &layouts.keys[0];
-        assert_eq!(k0.extra.get("url").and_then(Value::as_str), Some("/assets/keyboard/keycap.png"));
+        assert_eq!(
+            k0.extra.get("url").and_then(Value::as_str),
+            Some("/assets/keyboard/keycap.png")
+        );
     }
 
     #[test]
@@ -808,7 +825,11 @@ mod tests {
         assert_eq!(m.name, "Keychron M6");
         assert_eq!(m.device_type.as_deref(), Some("mouse"));
         assert_eq!(m.keys.len(), 11);
-        let middle = m.keys.iter().find(|k| k.id.as_deref() == Some("middle")).unwrap();
+        let middle = m
+            .keys
+            .iter()
+            .find(|k| k.id.as_deref() == Some("middle"))
+            .unwrap();
         assert_eq!(middle.index, 1);
         assert_eq!(middle.side, Some(1));
         assert_eq!(middle.dir.as_deref(), Some("right"));
@@ -836,7 +857,10 @@ mod tests {
 
     #[test]
     fn catalog_slice() {
-        let path = format!("{}/launcher-sources/vapi/device-catalog.json", env!("CARGO_MANIFEST_DIR"));
+        let path = format!(
+            "{}/launcher-sources/vapi/device-catalog.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
         let body = std::fs::read_to_string(&path).unwrap();
         let entries: Vec<CatalogEntry> = serde_json::from_str(&body).unwrap();
         assert_eq!(entries.len(), 988);
@@ -853,7 +877,11 @@ mod tests {
         let q10 = ProductInfo::from_catalog_file(Path::new(&path), 875823265).unwrap();
         assert_eq!(q10.name, "Q10");
         assert_eq!(q10.fw_version.as_deref(), Some("1.0.3"));
-        assert!(q10.fw_path.as_deref().unwrap().starts_with("https://cdn.shopify.com/"));
+        assert!(q10
+            .fw_path
+            .as_deref()
+            .unwrap()
+            .starts_with("https://cdn.shopify.com/"));
 
         // Unknown vpid → error.
         let err = ProductInfo::from_catalog_file(Path::new(&path), 0xDEAD).unwrap_err();
@@ -869,14 +897,21 @@ mod tests {
         // Store the M6 mouse as v3.json: offline load must find and parse it.
         std::fs::write(dir.join("v3.json"), sample("device/875876452/json/v3.json")).unwrap();
 
-        let opts = LoadOpts { cache_dir: Some(base.clone()), offline: true, ..Default::default() };
+        let opts = LoadOpts {
+            cache_dir: Some(base.clone()),
+            offline: true,
+            ..Default::default()
+        };
         let def = Definition::load(M6_VPID, &opts).unwrap();
         assert_eq!(def.name(), "Keychron M6");
         assert!(matches!(def, Definition::Mouse(_)));
 
         // Offline miss → NotCached pointing at the per-device cache dir.
         let err = Definition::load(0xDEAD, &opts).unwrap_err();
-        assert!(matches!(err, DefinitionError::NotCached { vpid: 0xDEAD, .. }));
+        assert!(matches!(
+            err,
+            DefinitionError::NotCached { vpid: 0xDEAD, .. }
+        ));
 
         std::fs::remove_dir_all(&base).ok();
     }
@@ -901,7 +936,14 @@ mod tests {
     #[test]
     #[ignore = "requires network access"]
     fn live_fetch_definition_and_product() {
-        let def = Definition::load(Q1_VPID, &LoadOpts { no_cache: true, ..Default::default() }).unwrap();
+        let def = Definition::load(
+            Q1_VPID,
+            &LoadOpts {
+                no_cache: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(def.name(), "Keychron Q1V1 ANSI");
 
         let info = ProductInfo::fetch(Q1_VPID).unwrap();
@@ -910,7 +952,14 @@ mod tests {
         println!("live product info: {info:?}");
 
         // M6 mouse definition via the live endpoint.
-        let mouse = Definition::load(M6_VPID, &LoadOpts { no_cache: true, ..Default::default() }).unwrap();
+        let mouse = Definition::load(
+            M6_VPID,
+            &LoadOpts {
+                no_cache: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(mouse.name(), "Keychron M6");
     }
 }

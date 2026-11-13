@@ -12,15 +12,29 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 // Exit codes (docs/CLI.md); constructed at runtime since ExitCode::from is not const.
-fn exit_runtime() -> ExitCode { ExitCode::from(1) }
-fn exit_usage() -> ExitCode { ExitCode::from(2) }
-fn exit_no_device() -> ExitCode { ExitCode::from(3) }
-fn exit_protocol() -> ExitCode { ExitCode::from(4) }
-fn exit_unsupported() -> ExitCode { ExitCode::from(5) }
+fn exit_runtime() -> ExitCode {
+    ExitCode::from(1)
+}
+fn exit_usage() -> ExitCode {
+    ExitCode::from(2)
+}
+fn exit_no_device() -> ExitCode {
+    ExitCode::from(3)
+}
+fn exit_protocol() -> ExitCode {
+    ExitCode::from(4)
+}
+fn exit_unsupported() -> ExitCode {
+    ExitCode::from(5)
+}
 const EXIT_OK: ExitCode = ExitCode::SUCCESS;
 
 #[derive(Parser)]
-#[command(name = "keychronctl", version, about = "Configure Keychron devices over USB HID")]
+#[command(
+    name = "keychronctl",
+    version,
+    about = "Configure Keychron devices over USB HID"
+)]
 struct Cli {
     /// Device selector: vpid, VID:PID, or hidraw path
     #[arg(short, long, value_name = "SPEC", global = true)]
@@ -261,18 +275,55 @@ fn main() -> ExitCode {
 
     match &cli.command {
         Command::List => cmd_list(cli.json, &interfaces),
-        Command::Info => cmd_info(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
-        Command::Battery => cmd_battery(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
+        Command::Info => cmd_info(
+            &api,
+            cli.json,
+            cli.verbose,
+            cli.device.as_deref(),
+            &interfaces,
+        ),
+        Command::Battery => cmd_battery(
+            &api,
+            cli.json,
+            cli.verbose,
+            cli.device.as_deref(),
+            &interfaces,
+        ),
         Command::Dpi { cmd } => cmd_dpi(cmd, &api, &cli, &interfaces),
-        Command::Pollrate { cmd } => cmd_simple_setting(SettingKind::Pollrate, cmd, &api, &cli, &interfaces),
-        Command::Sleep { cmd } => cmd_simple_setting(SettingKind::Sleep, cmd, &api, &cli, &interfaces),
-        Command::Debounce { cmd } => cmd_simple_setting(SettingKind::Debounce, cmd, &api, &cli, &interfaces),
-        Command::Lighting { cmd } => cmd_simple_setting(SettingKind::Lighting, cmd, &api, &cli, &interfaces),
-        Command::Sensor { cmd } => cmd_simple_setting(SettingKind::Sensor, cmd, &api, &cli, &interfaces),
-        Command::Scroll { cmd } => cmd_simple_setting(SettingKind::Scroll, cmd, &api, &cli, &interfaces),
-        Command::Settings => cmd_settings(&api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
+        Command::Pollrate { cmd } => {
+            cmd_simple_setting(SettingKind::Pollrate, cmd, &api, &cli, &interfaces)
+        }
+        Command::Sleep { cmd } => {
+            cmd_simple_setting(SettingKind::Sleep, cmd, &api, &cli, &interfaces)
+        }
+        Command::Debounce { cmd } => {
+            cmd_simple_setting(SettingKind::Debounce, cmd, &api, &cli, &interfaces)
+        }
+        Command::Lighting { cmd } => {
+            cmd_simple_setting(SettingKind::Lighting, cmd, &api, &cli, &interfaces)
+        }
+        Command::Sensor { cmd } => {
+            cmd_simple_setting(SettingKind::Sensor, cmd, &api, &cli, &interfaces)
+        }
+        Command::Scroll { cmd } => {
+            cmd_simple_setting(SettingKind::Scroll, cmd, &api, &cli, &interfaces)
+        }
+        Command::Settings => cmd_settings(
+            &api,
+            cli.json,
+            cli.verbose,
+            cli.device.as_deref(),
+            &interfaces,
+        ),
         Command::Binds { cmd } => cmd_binds(cmd, &api, &cli, &interfaces),
-        Command::Profile { cmd } => cmd_profile(cmd, &api, cli.json, cli.verbose, cli.device.as_deref(), &interfaces),
+        Command::Profile { cmd } => cmd_profile(
+            cmd,
+            &api,
+            cli.json,
+            cli.verbose,
+            cli.device.as_deref(),
+            &interfaces,
+        ),
         Command::Definitions { cmd } => cmd_definitions(cmd, &cli, &api, &interfaces),
     }
 }
@@ -290,7 +341,10 @@ fn cmd_list(json: bool, interfaces: &[hid::InterfaceInfo]) -> ExitCode {
         return EXIT_OK;
     }
 
-    println!("{:<12} {:<10} {:<10} {:<15} {}", "VPID", "VID:PID", "ROLE", "PATH", "PRODUCT");
+    println!(
+        "{:<12} {:<10} {:<10} {:<15} {}",
+        "VPID", "VID:PID", "ROLE", "PATH", "PRODUCT"
+    );
     for i in interfaces {
         println!(
             "{:<12} {:<10} {:<10} {:<15} {}",
@@ -338,7 +392,12 @@ fn select_interface<'a>(
     // Role priority: mouse interfaces first (current focus), then keyboard,
     // then bridge. Also applies to explicit selectors, because one hidraw
     // node can carry several roles (Link-KM: bridge + mouse-8k).
-    let priority = [hid::Role::Mouse8k, hid::Role::Mouse4k, hid::Role::Keyboard, hid::Role::Bridge];
+    let priority = [
+        hid::Role::Mouse8k,
+        hid::Role::Mouse4k,
+        hid::Role::Keyboard,
+        hid::Role::Bridge,
+    ];
     if let Some(spec) = spec {
         let matches = hid::match_selector_all(spec, interfaces);
         if matches.is_empty() {
@@ -384,7 +443,10 @@ fn cmd_info(
         Ok(d) => d,
         Err(e) => {
             eprintln!("error: cannot open {}: {e}", iface.path);
-            eprintln!("hint: check permissions on {} (udev rule may be required)", iface.path);
+            eprintln!(
+                "hint: check permissions on {} (udev rule may be required)",
+                iface.path
+            );
             return exit_runtime();
         }
     };
@@ -412,7 +474,10 @@ fn cmd_info(
                 map.insert("path".into(), iface.path.clone().into());
             }
             if json {
-                println!("{}", serde_json::to_string_pretty(&value).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&value).unwrap_or_default()
+                );
             } else {
                 print_info_human(&value);
             }
@@ -428,13 +493,18 @@ fn cmd_info(
 /// Mouse info via the dongle's mouse interface. The Link-KM dongle routes all
 /// mouse commands through output report 181 / input report 182 (usage page
 /// 0x8C); the 1k feature-report path only exists on older receivers.
-fn mouse_info(api: &HidApi, path: &std::ffi::CString, verbose: bool) -> Result<serde_json::Value, String> {
-    let open = || -> Result<hidapi::HidDevice, String> { api.open_path(path).map_err(|e| e.to_string()) };
+fn mouse_info(
+    api: &HidApi,
+    path: &std::ffi::CString,
+    verbose: bool,
+) -> Result<serde_json::Value, String> {
+    let open =
+        || -> Result<hidapi::HidDevice, String> { api.open_path(path).map_err(|e| e.to_string()) };
     let mut report = serde_json::Map::new();
 
     // Link version info (cmd 2 on reportId 181).
-    let info = open()
-        .and_then(|d| mouse::query_8k_version(d, verbose).map_err(|e| e.to_string()))?;
+    let info =
+        open().and_then(|d| mouse::query_8k_version(d, verbose).map_err(|e| e.to_string()))?;
     merge_mouse_info(&mut report, &info);
 
     // Bond list (cmd 3 on reportId 181): identifies the paired mouse.
@@ -442,7 +512,10 @@ fn mouse_info(api: &HidApi, path: &std::ffi::CString, verbose: bool) -> Result<s
     match open().and_then(|d| mouse::query_8k_bond_list(d, verbose).map_err(|e| e.to_string())) {
         Ok(bonded) => {
             paired_vpid = bonded.iter().find(|b| b.active).map(|b| b.vpid);
-            report.insert("bonded".into(), serde_json::to_value(&bonded).unwrap_or_default());
+            report.insert(
+                "bonded".into(),
+                serde_json::to_value(&bonded).unwrap_or_default(),
+            );
         }
         Err(e) => {
             report.insert("bond_error".into(), e.into());
@@ -450,12 +523,15 @@ fn mouse_info(api: &HidApi, path: &std::ffi::CString, verbose: bool) -> Result<s
     }
 
     // Settings snapshot (cmd 6 on reportId 179): battery + DPI + profile.
-    if let Ok(power) = open().and_then(|d| mouse::query_8k_power(d, verbose).map_err(|e| e.to_string())) {
+    if let Ok(power) =
+        open().and_then(|d| mouse::query_8k_power(d, verbose).map_err(|e| e.to_string()))
+    {
         report.insert("battery_percent".into(), power.battery_percent.into());
         report.insert("battery_state".into(), power.battery_state.into());
         report.insert("charging".into(), power.charging.into());
     }
-    if let Ok(dpi) = open().and_then(|d| mouse::query_8k_dpi(d, verbose).map_err(|e| e.to_string())) {
+    if let Ok(dpi) = open().and_then(|d| mouse::query_8k_dpi(d, verbose).map_err(|e| e.to_string()))
+    {
         report.insert("dpi".into(), serde_json::to_value(&dpi).unwrap_or_default());
     }
 
@@ -470,7 +546,10 @@ fn mouse_info(api: &HidApi, path: &std::ffi::CString, verbose: bool) -> Result<s
     Ok(serde_json::Value::Object(report))
 }
 
-fn merge_mouse_info(report: &mut serde_json::Map<String, serde_json::Value>, info: &mouse::MouseInfo) {
+fn merge_mouse_info(
+    report: &mut serde_json::Map<String, serde_json::Value>,
+    info: &mouse::MouseInfo,
+) {
     let json = serde_json::to_value(info).unwrap_or_default();
     if let serde_json::Value::Object(map) = json {
         for (k, v) in map {
@@ -492,7 +571,10 @@ fn open_selected(
     })?;
     let dev = api.open_path(&path).map_err(|e| {
         eprintln!("error: cannot open {}: {e}", iface.path);
-        eprintln!("hint: check permissions on {} (udev rule may be required)", iface.path);
+        eprintln!(
+            "hint: check permissions on {} (udev rule may be required)",
+            iface.path
+        );
         exit_runtime()
     })?;
     Ok((iface.clone(), dev))
@@ -536,7 +618,12 @@ fn cmd_dpi(
         Err(c) => return c,
     };
 
-    let Some(DpiCmd::Set { value, stage, levels }) = cmd else {
+    let Some(DpiCmd::Set {
+        value,
+        stage,
+        levels,
+    }) = cmd
+    else {
         // Plain `dpi` — show the current ladder.
         let result = mouse::query_8k_dpi(dev, verbose)
             .map(|d| serde_json::to_value(&d).unwrap_or_default())
@@ -553,7 +640,10 @@ fn cmd_dpi(
         }
     };
     if snap.dpi_level_num as usize > snap.dpi_values.len() {
-        eprintln!("error: device reports {} DPI levels but only 5 fit the wire format", snap.dpi_level_num);
+        eprintln!(
+            "error: device reports {} DPI levels but only 5 fit the wire format",
+            snap.dpi_level_num
+        );
         return exit_unsupported();
     }
     let mut values = snap.dpi_values;
@@ -561,7 +651,10 @@ fn cmd_dpi(
 
     if let Some(l) = stage {
         if *l >= snap.dpi_level_num {
-            eprintln!("error: stage {l} out of range (device has {})", snap.dpi_level_num);
+            eprintln!(
+                "error: stage {l} out of range (device has {})",
+                snap.dpi_level_num
+            );
             return exit_usage();
         }
         new_level = *l;
@@ -593,7 +686,10 @@ fn cmd_dpi(
     // beyond its real sensor range.
     if let definition::Definition::Mouse(m) = &ctx.def {
         if m.dpi.as_ref().map(|d| d.limit.len()) == Some(2) {
-            let (min, max) = (m.dpi.as_ref().unwrap().limit[0], m.dpi.as_ref().unwrap().limit[1]);
+            let (min, max) = (
+                m.dpi.as_ref().unwrap().limit[0],
+                m.dpi.as_ref().unwrap().limit[1],
+            );
             if let Some(&bad) = values.iter().find(|&&v| v < min || v > max) {
                 eprintln!("error: DPI {bad} outside device range {min}..={max}");
                 return exit_usage();
@@ -621,7 +717,10 @@ fn cmd_dpi(
                     })
                 );
             } else {
-                println!("DPI set: stage {} -> {}", new_level, values[new_level as usize]);
+                println!(
+                    "DPI set: stage {} -> {}",
+                    new_level, values[new_level as usize]
+                );
                 for (i, v) in values.iter().enumerate().take(snap.dpi_level_num as usize) {
                     let marker = if i as u8 == new_level { "*" } else { " " };
                     println!(" {marker} stage {i}: {v}");
@@ -707,16 +806,22 @@ fn cmd_simple_setting(
     // ---------------- reads ----------------
     if !set {
         let result: Result<serde_json::Value, String> = match kind {
-            SettingKind::Pollrate => mouse::query_8k_snapshot(dev, verbose).map(|s| {
-                let hz: Vec<u32> = s.rate_table.iter().map(|&l| mouse::polling_hz(l).unwrap_or(0)).collect();
-                serde_json::json!({
-                    "currentLevel": s.rate_levels,
-                    "hz": mouse::polling_hz(s.rate_levels[0]),
-                    "levels": s.rate_table,
-                    "levelsHz": hz,
-                    "levelNum": s.rate_level_num,
+            SettingKind::Pollrate => mouse::query_8k_snapshot(dev, verbose)
+                .map(|s| {
+                    let hz: Vec<u32> = s
+                        .rate_table
+                        .iter()
+                        .map(|&l| mouse::polling_hz(l).unwrap_or(0))
+                        .collect();
+                    serde_json::json!({
+                        "currentLevel": s.rate_levels,
+                        "hz": mouse::polling_hz(s.rate_levels[0]),
+                        "levels": s.rate_table,
+                        "levelsHz": hz,
+                        "levelNum": s.rate_level_num,
+                    })
                 })
-            }).map_err(|e| e.to_string()),
+                .map_err(|e| e.to_string()),
             SettingKind::Sleep => mouse::get_8k_sleep(dev, verbose)
                 .map(|m| serde_json::json!({ "minutes": m, "never": m == 255 }))
                 .map_err(|e| e.to_string()),
@@ -727,7 +832,8 @@ fn cmd_simple_setting(
                 .map(|l| serde_json::to_value(&l).unwrap_or_default())
                 .map_err(|e| {
                     if e.to_string().contains("timeout") {
-                        "timed out — this device likely has no RGB lighting (the M6 has none)".to_string()
+                        "timed out — this device likely has no RGB lighting (the M6 has none)"
+                            .to_string()
                     } else {
                         e.to_string()
                     }
@@ -813,7 +919,13 @@ fn cmd_simple_setting(
                 Ok(d) => d,
                 Err(c) => return c,
             };
-            match mouse::set_8k_polling_rate(dev2, level as u8, &snap.rate_table, snap.rate_level_num, verbose) {
+            match mouse::set_8k_polling_rate(
+                dev2,
+                level as u8,
+                &snap.rate_table,
+                snap.rate_level_num,
+                verbose,
+            ) {
                 Ok(()) => {
                     if !json {
                         println!("polling rate set to {hz} Hz (level {level})");
@@ -894,7 +1006,9 @@ fn cmd_simple_setting(
                 },
                 None => current.as_ref().map(|c| c.mode).unwrap_or(0),
             };
-            let b = brightness.or(current.as_ref().map(|c| c.brightness)).unwrap_or(50);
+            let b = brightness
+                .or(current.as_ref().map(|c| c.brightness))
+                .unwrap_or(50);
             let s = speed.or(current.as_ref().map(|c| c.speed)).unwrap_or(50);
             let color = match rgb {
                 Some(r) => match parse_rgb(r) {
@@ -908,7 +1022,10 @@ fn cmd_simple_setting(
                     if json {
                         println!("{}", serde_json::to_string_pretty(&l).unwrap_or_default());
                     } else {
-                        println!("lighting set: mode {}, brightness {}, speed {}, rgb {:?}", l.mode, l.brightness, l.speed, l.rgb);
+                        println!(
+                            "lighting set: mode {}, brightness {}, speed {}, rgb {:?}",
+                            l.mode, l.brightness, l.speed, l.rgb
+                        );
                     }
                     EXIT_OK
                 }
@@ -1037,11 +1154,18 @@ fn print_setting_human(kind: SettingKind, v: &serde_json::Value) {
     match kind {
         SettingKind::Pollrate => {
             let hz = get("hz").and_then(|x| x.as_u64());
-            let current = get("currentLevel").and_then(|x| x.as_array()).and_then(|a| a.first()).and_then(|x| x.as_u64());
-            let levels = get("levelsHz").and_then(|x| x.as_array()).map(|a| {
-                a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>()
-            }).unwrap_or_default();
-            println!("polling rate: {} Hz", hz.map(|h| h.to_string()).unwrap_or_else(|| "?".into()));
+            let current = get("currentLevel")
+                .and_then(|x| x.as_array())
+                .and_then(|a| a.first())
+                .and_then(|x| x.as_u64());
+            let levels = get("levelsHz")
+                .and_then(|x| x.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>())
+                .unwrap_or_default();
+            println!(
+                "polling rate: {} Hz",
+                hz.map(|h| h.to_string()).unwrap_or_else(|| "?".into())
+            );
             for (i, h) in levels.iter().enumerate() {
                 let marker = if Some(i as u64) == current { "*" } else { " " };
                 println!(" {marker} level {i}: {h} Hz");
@@ -1056,10 +1180,14 @@ fn print_setting_human(kind: SettingKind, v: &serde_json::Value) {
             }
         }
         SettingKind::Debounce => {
-            println!("debounce: {} ms", get("ms").and_then(|x| x.as_u64()).unwrap_or(0));
-            let opts = get("options").and_then(|x| x.as_array()).map(|a| {
-                a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>()
-            }).unwrap_or_default();
+            println!(
+                "debounce: {} ms",
+                get("ms").and_then(|x| x.as_u64()).unwrap_or(0)
+            );
+            let opts = get("options")
+                .and_then(|x| x.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>())
+                .unwrap_or_default();
             if !opts.is_empty() {
                 println!("options: {:?}", opts);
             }
@@ -1070,7 +1198,10 @@ fn print_setting_human(kind: SettingKind, v: &serde_json::Value) {
                 get("mode").and_then(|x| x.as_u64()).unwrap_or(0),
                 get("brightness").and_then(|x| x.as_u64()).unwrap_or(0),
                 get("speed").and_then(|x| x.as_u64()).unwrap_or(0),
-                get("rgb").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>()).unwrap_or_default(),
+                get("rgb")
+                    .and_then(|x| x.as_array())
+                    .map(|a| a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>())
+                    .unwrap_or_default(),
             );
         }
         SettingKind::Sensor => {
@@ -1081,7 +1212,11 @@ fn print_setting_human(kind: SettingKind, v: &serde_json::Value) {
                 onoff(get("wave").and_then(|x| x.as_bool()).unwrap_or(false)),
                 onoff(get("line").and_then(|x| x.as_bool()).unwrap_or(false)),
                 onoff(get("motion").and_then(|x| x.as_bool()).unwrap_or(false)),
-                if get("scroll_dir").and_then(|x| x.as_bool()).unwrap_or(false) { "reverse" } else { "normal" },
+                if get("scroll_dir").and_then(|x| x.as_bool()).unwrap_or(false) {
+                    "reverse"
+                } else {
+                    "normal"
+                },
                 onoff(get("fps20k").and_then(|x| x.as_bool()).unwrap_or(false)),
             );
         }
@@ -1132,22 +1267,74 @@ fn cmd_settings(
 
 fn print_settings_human(v: &serde_json::Value) {
     let get_u = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
-    println!("profile:    {} of {}", get_u("profile") + 1, get_u("profile_count"));
-    let dpi_levels: Vec<u64> = v.get("dpi_values").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64()).collect()).unwrap_or_default();
-    let cur = v.get("dpi_levels").and_then(|x| x.as_array()).and_then(|a| a.first()).and_then(|x| x.as_u64()).unwrap_or(0);
-    println!("dpi:        stage {} ({} DPI)", cur, dpi_levels.get(cur as usize).copied().unwrap_or(0));
-    for (i, d) in dpi_levels.iter().take(get_u("dpi_level_num") as usize).enumerate() {
+    println!(
+        "profile:    {} of {}",
+        get_u("profile") + 1,
+        get_u("profile_count")
+    );
+    let dpi_levels: Vec<u64> = v
+        .get("dpi_values")
+        .and_then(|x| x.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_u64()).collect())
+        .unwrap_or_default();
+    let cur = v
+        .get("dpi_levels")
+        .and_then(|x| x.as_array())
+        .and_then(|a| a.first())
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0);
+    println!(
+        "dpi:        stage {} ({} DPI)",
+        cur,
+        dpi_levels.get(cur as usize).copied().unwrap_or(0)
+    );
+    for (i, d) in dpi_levels
+        .iter()
+        .take(get_u("dpi_level_num") as usize)
+        .enumerate()
+    {
         let marker = if i as u64 == cur { "*" } else { " " };
         println!(" {marker} stage {i}: {d}");
     }
-    let rates: Vec<u64> = v.get("rate_table").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64()).collect()).unwrap_or_default();
-    let rcur = v.get("rate_levels").and_then(|x| x.as_array()).and_then(|a| a.first()).and_then(|x| x.as_u64()).unwrap_or(0);
-    let hz = rates.get(rcur as usize).and_then(|&l| mouse::POLLING_RATE_HZ.get(l as usize)).copied();
-    println!("rate:       level {} ({} Hz)", rcur, hz.map(|h| h.to_string()).unwrap_or_else(|| "?".into()));
+    let rates: Vec<u64> = v
+        .get("rate_table")
+        .and_then(|x| x.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_u64()).collect())
+        .unwrap_or_default();
+    let rcur = v
+        .get("rate_levels")
+        .and_then(|x| x.as_array())
+        .and_then(|a| a.first())
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0);
+    let hz = rates
+        .get(rcur as usize)
+        .and_then(|&l| mouse::POLLING_RATE_HZ.get(l as usize))
+        .copied();
+    println!(
+        "rate:       level {} ({} Hz)",
+        rcur,
+        hz.map(|h| h.to_string()).unwrap_or_else(|| "?".into())
+    );
     let sleep = get_u("sleep_minutes");
-    println!("sleep:      {}", if sleep == 255 { "never".to_string() } else { format!("{sleep} min") });
+    println!(
+        "sleep:      {}",
+        if sleep == 255 {
+            "never".to_string()
+        } else {
+            format!("{sleep} min")
+        }
+    );
     println!("debounce:   {} ms", get_u("debounce"));
-    println!("battery:    {}% {}", get_u("battery_percent"), if v.get("charging").and_then(|x| x.as_bool()).unwrap_or(false) { "(charging)" } else { "" });
+    println!(
+        "battery:    {}% {}",
+        get_u("battery_percent"),
+        if v.get("charging").and_then(|x| x.as_bool()).unwrap_or(false) {
+            "(charging)"
+        } else {
+            ""
+        }
+    );
     if let Some(sys) = v.get("sys") {
         let b = |k: &str| sys.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
         println!(
@@ -1187,7 +1374,10 @@ fn print_query_result(
                 map.insert("path".into(), iface.path.clone().into());
             }
             if json {
-                println!("{}", serde_json::to_string_pretty(&value).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&value).unwrap_or_default()
+                );
             } else {
                 print_info_human(&value);
             }
@@ -1218,13 +1408,21 @@ struct MouseCtx {
     def: definition::Definition,
 }
 
-fn mouse_context(api: &HidApi, cli: &Cli, spec: Option<&str>, interfaces: &[hid::InterfaceInfo]) -> Result<MouseCtx, ExitCode> {
+fn mouse_context(
+    api: &HidApi,
+    cli: &Cli,
+    spec: Option<&str>,
+    interfaces: &[hid::InterfaceInfo],
+) -> Result<MouseCtx, ExitCode> {
     let iface = match select_interface(spec, interfaces) {
         Ok(i) => i.clone(),
         Err(code) => return Err(code),
     };
     if iface.role != hid::Role::Mouse8k && iface.role != hid::Role::Mouse4k {
-        eprintln!("error: selected device is not a mouse interface ({}); use `keychronctl list`", iface.role.as_str());
+        eprintln!(
+            "error: selected device is not a mouse interface ({}); use `keychronctl list`",
+            iface.role.as_str()
+        );
         return Err(exit_unsupported());
     }
     let path = match std::ffi::CString::new(iface.path.as_str()) {
@@ -1257,10 +1455,20 @@ fn mouse_context(api: &HidApi, cli: &Cli, spec: Option<&str>, interfaces: &[hid:
             return Err(exit_runtime());
         }
     };
-    Ok(MouseCtx { iface, path, vpid, def })
+    Ok(MouseCtx {
+        iface,
+        path,
+        vpid,
+        def,
+    })
 }
 
-fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::InterfaceInfo]) -> ExitCode {
+fn cmd_binds(
+    cmd: &BindsCmd,
+    api: &HidApi,
+    cli: &Cli,
+    interfaces: &[hid::InterfaceInfo],
+) -> ExitCode {
     let ctx = match mouse_context(api, cli, cli.device.as_deref(), interfaces) {
         Ok(c) => c,
         Err(code) => return code,
@@ -1268,8 +1476,13 @@ fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::Interfa
     let verbose = cli.verbose;
     let json = cli.json;
 
-    match cmd {        BindsCmd::List { profile } => {
-            let (current, count) = match api.open_path(&ctx.path).ok().map(|d| mouse::query_8k_profile(d, verbose)) {
+    match cmd {
+        BindsCmd::List { profile } => {
+            let (current, count) = match api
+                .open_path(&ctx.path)
+                .ok()
+                .map(|d| mouse::query_8k_profile(d, verbose))
+            {
                 Some(Ok(p)) => (p.current, p.count),
                 _ => {
                     eprintln!("error: cannot read profile info");
@@ -1305,7 +1518,10 @@ fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::Interfa
                     return exit_unsupported();
                 }
                 if p != current {
-                    if let Err(e) = api.open_path(&ctx.path).map(|d| mouse::set_8k_profile(d, p, count, verbose)) {
+                    if let Err(e) = api
+                        .open_path(&ctx.path)
+                        .map(|d| mouse::set_8k_profile(d, p, count, verbose))
+                    {
                         eprintln!("error: cannot switch to profile {p}: {e:?}");
                         return exit_protocol();
                     }
@@ -1313,7 +1529,9 @@ fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::Interfa
                 let bindings = collect_bindings(api, &ctx.path, &def_indexes, verbose);
                 if p != current {
                     // Restore the previously active profile.
-                    let _ = api.open_path(&ctx.path).map(|d| mouse::set_8k_profile(d, current, count, verbose));
+                    let _ = api
+                        .open_path(&ctx.path)
+                        .map(|d| mouse::set_8k_profile(d, current, count, verbose));
                 }
                 let annotated: Vec<serde_json::Value> = bindings
                     .iter()
@@ -1334,15 +1552,26 @@ fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::Interfa
             out.insert("product".into(), ctx.def.name().into());
             out.insert("current_profile".into(), current.into());
             out.insert("profile_count".into(), count.into());
-            out.insert("profiles".into(), serde_json::Value::Array(binds_by_profile));
+            out.insert(
+                "profiles".into(),
+                serde_json::Value::Array(binds_by_profile),
+            );
             if json {
-                println!("{}", serde_json::to_string_pretty(&serde_json::Value::Object(out)).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::Value::Object(out))
+                        .unwrap_or_default()
+                );
             } else {
                 print_binds_human(&serde_json::Value::Object(out));
             }
             EXIT_OK
         }
-        BindsCmd::Set { index, action, profile } => {
+        BindsCmd::Set {
+            index,
+            action,
+            profile,
+        } => {
             // Validate the button index against the device definition — the
             // dongle ACKs any index, even nonexistent buttons.
             if let definition::Definition::Mouse(m) = &ctx.def {
@@ -1360,7 +1589,11 @@ fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::Interfa
                     return exit_usage();
                 }
             };
-            let (current, count) = match api.open_path(&ctx.path).ok().map(|d| mouse::query_8k_profile(d, verbose)) {
+            let (current, count) = match api
+                .open_path(&ctx.path)
+                .ok()
+                .map(|d| mouse::query_8k_profile(d, verbose))
+            {
                 Some(Ok(p)) => (p.current, p.count),
                 _ => (0, 1),
             };
@@ -1370,7 +1603,10 @@ fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::Interfa
                 return exit_unsupported();
             }
             if target != current {
-                if let Err(e) = api.open_path(&ctx.path).map(|d| mouse::set_8k_profile(d, target, count, verbose)) {
+                if let Err(e) = api
+                    .open_path(&ctx.path)
+                    .map(|d| mouse::set_8k_profile(d, target, count, verbose))
+                {
                     eprintln!("error: cannot switch to profile {target}: {e:?}");
                     return exit_protocol();
                 }
@@ -1378,17 +1614,24 @@ fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::Interfa
             let result = api
                 .open_path(&ctx.path)
                 .map_err(|e| e.to_string())
-                .and_then(|d| mouse::set_8k_funkey(d, *index, ftype, &data, verbose).map_err(|e| e.to_string()));
+                .and_then(|d| {
+                    mouse::set_8k_funkey(d, *index, ftype, &data, verbose)
+                        .map_err(|e| e.to_string())
+                });
             if target != current {
-                let _ = api.open_path(&ctx.path).map(|d| mouse::set_8k_profile(d, current, count, verbose));
+                let _ = api
+                    .open_path(&ctx.path)
+                    .map(|d| mouse::set_8k_profile(d, current, count, verbose));
             }
             match result {
                 Ok(()) => {
                     if !json {
                         println!("set button {index} -> {} on profile {target}", action);
                     } else {
-                        println!("{{\"index\": {index}, \"action\": {}, \"profile\": {target}}}",
-                            serde_json::to_string(action).unwrap_or_default());
+                        println!(
+                            "{{\"index\": {index}, \"action\": {}, \"profile\": {target}}}",
+                            serde_json::to_string(action).unwrap_or_default()
+                        );
                     }
                     EXIT_OK
                 }
@@ -1401,8 +1644,14 @@ fn cmd_binds(cmd: &BindsCmd, api: &HidApi, cli: &Cli, interfaces: &[hid::Interfa
     }
 }
 
-fn collect_bindings(api: &HidApi, path: &std::ffi::CString, def_indexes: &[u8], verbose: bool) -> Vec<mouse::FunKeyBinding> {
-    let opener = || -> Result<hidapi::HidDevice, String> { api.open_path(path).map_err(|e| e.to_string()) };
+fn collect_bindings(
+    api: &HidApi,
+    path: &std::ffi::CString,
+    def_indexes: &[u8],
+    verbose: bool,
+) -> Vec<mouse::FunKeyBinding> {
+    let opener =
+        || -> Result<hidapi::HidDevice, String> { api.open_path(path).map_err(|e| e.to_string()) };
     match mouse::query_8k_funkeys(
         || opener().map_err(|e| transceiver::ProtocolError { message: e }),
         def_indexes,
@@ -1424,7 +1673,9 @@ fn parse_funkey_action(spec: &str) -> Result<(u8, Vec<u8>), String> {
         _ => {}
     }
     let Some((kind, arg)) = spec.split_once(':') else {
-        return Err(format!("unknown action '{spec}' (expected kind:value, remove, or disable)"));
+        return Err(format!(
+            "unknown action '{spec}' (expected kind:value, remove, or disable)"
+        ));
     };
     let be24 = |v: u32| vec![(v >> 16) as u8, (v >> 8) as u8, v as u8];
     match kind {
@@ -1446,7 +1697,9 @@ fn parse_funkey_action(spec: &str) -> Result<(u8, Vec<u8>), String> {
             Ok((mouse::FK_POLLING_RATE, vec![v, 0]))
         }
         "profile" => {
-            let v: u8 = arg.parse().map_err(|_| format!("invalid profile index '{arg}'"))?;
+            let v: u8 = arg
+                .parse()
+                .map_err(|_| format!("invalid profile index '{arg}'"))?;
             Ok((mouse::FK_PROFILE, vec![v]))
         }
         "shortcut" => {
@@ -1454,7 +1707,9 @@ fn parse_funkey_action(spec: &str) -> Result<(u8, Vec<u8>), String> {
             Ok((mouse::FK_SHORTCUT, be24(v)))
         }
         "light" => {
-            let v: u8 = arg.parse().map_err(|_| format!("invalid light value '{arg}'"))?;
+            let v: u8 = arg
+                .parse()
+                .map_err(|_| format!("invalid light value '{arg}'"))?;
             Ok((mouse::FK_LIGHT, vec![v]))
         }
         "keyboard" => {
@@ -1488,10 +1743,18 @@ fn parse_funkey_action(spec: &str) -> Result<(u8, Vec<u8>), String> {
 
 fn basic_key_by_name(name: &str) -> Result<u32, String> {
     const TABLE: &[(&str, u32)] = &[
-        ("left", 0x010000), ("right", 0x020000), ("middle", 0x040000),
-        ("forward", 0x100000), ("backward", 0x080000), ("leftDouble", 0x800000),
-        ("upScroll", 0x000200), ("downScroll", 0x00FE00), ("leftScroll", 0x0000FE),
-        ("rightScroll", 0x000002), ("leftScrollSustain", 0x4000FF), ("rightScrollSustain", 0x400001),
+        ("left", 0x010000),
+        ("right", 0x020000),
+        ("middle", 0x040000),
+        ("forward", 0x100000),
+        ("backward", 0x080000),
+        ("leftDouble", 0x800000),
+        ("upScroll", 0x000200),
+        ("downScroll", 0x00FE00),
+        ("leftScroll", 0x0000FE),
+        ("rightScroll", 0x000002),
+        ("leftScrollSustain", 0x4000FF),
+        ("rightScrollSustain", 0x400001),
     ];
     if let Some((_, v)) = TABLE.iter().find(|(n, _)| *n == name) {
         return Ok(*v);
@@ -1504,13 +1767,20 @@ fn basic_key_by_name(name: &str) -> Result<u32, String> {
 
 fn media_key_by_name(name: &str) -> Result<u16, String> {
     const TABLE: &[(&str, u16)] = &[
-        ("volumeUp", 233), ("volumeDown", 234), ("mute", 226), ("player", 387),
-        ("pause", 205), ("previous", 182), ("next", 181), ("stop", 183),
+        ("volumeUp", 233),
+        ("volumeDown", 234),
+        ("mute", 226),
+        ("player", 387),
+        ("pause", 205),
+        ("previous", 182),
+        ("next", 181),
+        ("stop", 183),
     ];
     if let Some((_, v)) = TABLE.iter().find(|(n, _)| *n == name) {
         return Ok(*v);
     }
-    name.parse::<u16>().map_err(|_| format!("unknown media key '{name}'"))
+    name.parse::<u16>()
+        .map_err(|_| format!("unknown media key '{name}'"))
 }
 
 fn loop_key_by_name(name: &str) -> Result<u8, String> {
@@ -1524,14 +1794,29 @@ fn loop_key_by_name(name: &str) -> Result<u8, String> {
 
 fn shortcut_key_by_name(name: &str) -> Result<u32, String> {
     const TABLE: &[(&str, u32)] = &[
-        ("brightnessUp", 814848), ("brightnessDown", 815104), ("calculate", 823809),
-        ("myComputer", 824321), ("homePage", 795394), ("email", 821761),
-        ("refresh", 458814), ("switchApp", 459819), ("task", 827138),
-        ("launchPad", 827394), ("home", 460807), ("screenshot", 461334),
-        ("copy", 459014), ("cut", 459035), ("paste", 459033),
-        ("screenshotMac", 461345), ("copyMac", 460806), ("cutMac", 460827),
-        ("pasteMac", 460825), ("webLessen", 459053), ("webMagnify", 459054),
-        ("webLessenMac", 460845), ("webMagnifyMac", 460846),
+        ("brightnessUp", 814848),
+        ("brightnessDown", 815104),
+        ("calculate", 823809),
+        ("myComputer", 824321),
+        ("homePage", 795394),
+        ("email", 821761),
+        ("refresh", 458814),
+        ("switchApp", 459819),
+        ("task", 827138),
+        ("launchPad", 827394),
+        ("home", 460807),
+        ("screenshot", 461334),
+        ("copy", 459014),
+        ("cut", 459035),
+        ("paste", 459033),
+        ("screenshotMac", 461345),
+        ("copyMac", 460806),
+        ("cutMac", 460827),
+        ("pasteMac", 460825),
+        ("webLessen", 459053),
+        ("webMagnify", 459054),
+        ("webLessenMac", 460845),
+        ("webMagnifyMac", 460846),
     ];
     if let Some((_, v)) = TABLE.iter().find(|(n, _)| *n == name) {
         return Ok(*v);
@@ -1559,8 +1844,16 @@ fn modifier_bit_by_name(name: &str) -> Option<u8> {
 fn print_binds_human(value: &serde_json::Value) {
     let obj = value.as_object().unwrap();
     let get = |k: &str| obj.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
-    println!("product:    {} (vpid {})", obj.get("product").and_then(|v| v.as_str()).unwrap_or("-"), get("vpid"));
-    println!("profiles:   {} of {} active", get("current_profile") + 1, get("profile_count"));
+    println!(
+        "product:    {} (vpid {})",
+        obj.get("product").and_then(|v| v.as_str()).unwrap_or("-"),
+        get("vpid")
+    );
+    println!(
+        "profiles:   {} of {} active",
+        get("current_profile") + 1,
+        get("profile_count")
+    );
     if let Some(serde_json::Value::Array(profiles)) = obj.get("profiles") {
         for p in profiles {
             let po = p.as_object().unwrap();
@@ -1576,7 +1869,11 @@ fn print_binds_human(value: &serde_json::Value) {
                     let key = bo.get("key").and_then(|v| v.as_str()).unwrap_or("");
                     let action = bo.get("action").and_then(|v| v.as_str()).unwrap_or("?");
                     let value = bo.get("value").and_then(|v| v.as_str()).unwrap_or("");
-                    let value = if value.is_empty() { String::new() } else { format!(":{value}") };
+                    let value = if value.is_empty() {
+                        String::new()
+                    } else {
+                        format!(":{value}")
+                    };
                     println!("  [{index}] {key:<10} {action}{value}");
                 }
             }
@@ -1584,7 +1881,14 @@ fn print_binds_human(value: &serde_json::Value) {
     }
 }
 
-fn cmd_profile(cmd: &ProfileCmd, api: &HidApi, json: bool, verbose: bool, spec: Option<&str>, interfaces: &[hid::InterfaceInfo]) -> ExitCode {
+fn cmd_profile(
+    cmd: &ProfileCmd,
+    api: &HidApi,
+    json: bool,
+    verbose: bool,
+    spec: Option<&str>,
+    interfaces: &[hid::InterfaceInfo],
+) -> ExitCode {
     let iface = match select_interface(spec, interfaces) {
         Ok(i) => i.clone(),
         Err(code) => return code,
@@ -1634,7 +1938,10 @@ fn cmd_profile(cmd: &ProfileCmd, api: &HidApi, json: bool, verbose: bool, spec: 
                     }
                     return EXIT_OK;
                 }
-                match api.open_path(&path).map(|d| mouse::set_8k_profile(d, *index, count, verbose)) {
+                match api
+                    .open_path(&path)
+                    .map(|d| mouse::set_8k_profile(d, *index, count, verbose))
+                {
                     Ok(Ok(())) => {
                         if !json {
                             println!("switched to profile {index}");
@@ -1663,7 +1970,10 @@ fn cmd_profile(cmd: &ProfileCmd, api: &HidApi, json: bool, verbose: bool, spec: 
                     return exit_unsupported();
                 }
                 let new_count = count + 1;
-                match api.open_path(&path).map(|d| mouse::set_8k_profile(d, current, new_count, verbose)) {
+                match api
+                    .open_path(&path)
+                    .map(|d| mouse::set_8k_profile(d, current, new_count, verbose))
+                {
                     Ok(Ok(())) => {
                         if !json {
                             println!("created profile {new_count} (total {new_count})");
@@ -1693,7 +2003,10 @@ fn cmd_profile(cmd: &ProfileCmd, api: &HidApi, json: bool, verbose: bool, spec: 
                 }
                 let new_count = count - 1;
                 let target = if current >= new_count { 0 } else { current };
-                match api.open_path(&path).map(|d| mouse::set_8k_profile(d, target, new_count, verbose)) {
+                match api
+                    .open_path(&path)
+                    .map(|d| mouse::set_8k_profile(d, target, new_count, verbose))
+                {
                     Ok(Ok(())) => {
                         if !json {
                             println!("removed profile; {new_count} remain (active: {target})");
@@ -1718,7 +2031,12 @@ fn cmd_profile(cmd: &ProfileCmd, api: &HidApi, json: bool, verbose: bool, spec: 
     }
 }
 
-fn cmd_definitions(cmd: &DefinitionsCmd, cli: &Cli, api: &HidApi, interfaces: &[hid::InterfaceInfo]) -> ExitCode {
+fn cmd_definitions(
+    cmd: &DefinitionsCmd,
+    cli: &Cli,
+    api: &HidApi,
+    interfaces: &[hid::InterfaceInfo],
+) -> ExitCode {
     let json = cli.json;
     // A vpid argument, else the connected device's (paired mouse preferred).
     let resolve_vpid = |explicit: Option<u32>| -> Result<u32, ExitCode> {
@@ -1727,8 +2045,12 @@ fn cmd_definitions(cmd: &DefinitionsCmd, cli: &Cli, api: &HidApi, interfaces: &[
         }
         // Prefer the paired mouse on a dongle (bond list, cmd 3 on reportId 181).
         for iface in interfaces.iter().filter(|i| i.role == hid::Role::Mouse8k) {
-            let Ok(path) = std::ffi::CString::new(iface.path.as_str()) else { continue };
-            let Ok(dev) = api.open_path(&path) else { continue };
+            let Ok(path) = std::ffi::CString::new(iface.path.as_str()) else {
+                continue;
+            };
+            let Ok(dev) = api.open_path(&path) else {
+                continue;
+            };
             if let Ok(bonded) = mouse::query_8k_bond_list(dev, false) {
                 if let Some(active) = bonded.iter().find(|b| b.active) {
                     return Ok(active.vpid);
@@ -1754,7 +2076,10 @@ fn cmd_definitions(cmd: &DefinitionsCmd, cli: &Cli, api: &HidApi, interfaces: &[
             match definition::Definition::load(vpid, &load_opts(cli)) {
                 Ok(def) => {
                     if json {
-                        println!("{{\"vpid\": {vpid}, \"name\": {}}}", serde_json::to_string(def.name()).unwrap_or_default());
+                        println!(
+                            "{{\"vpid\": {vpid}, \"name\": {}}}",
+                            serde_json::to_string(def.name()).unwrap_or_default()
+                        );
                     } else {
                         println!("fetched {} (vpid {vpid})", def.name());
                     }
@@ -1771,7 +2096,9 @@ fn cmd_definitions(cmd: &DefinitionsCmd, cli: &Cli, api: &HidApi, interfaces: &[
             let mut entries: Vec<(u32, String)> = Vec::new();
             if let Ok(read) = std::fs::read_dir(&dir) {
                 for entry in read.flatten() {
-                    let Ok(vpid) = entry.file_name().to_string_lossy().parse::<u32>() else { continue };
+                    let Ok(vpid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+                        continue;
+                    };
                     for name in ["v3.json", "v2.json"] {
                         let f = entry.path().join(name);
                         if let Ok(s) = std::fs::read_to_string(&f) {
@@ -1785,7 +2112,10 @@ fn cmd_definitions(cmd: &DefinitionsCmd, cli: &Cli, api: &HidApi, interfaces: &[
             }
             entries.sort();
             if json {
-                println!("{}", serde_json::to_string_pretty(&entries).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&entries).unwrap_or_default()
+                );
             } else {
                 if entries.is_empty() {
                     println!("definition cache is empty ({})", dir.display());
@@ -1834,13 +2164,20 @@ fn print_dpi_human(dpi: &serde_json::Map<String, serde_json::Value>) {
         if let Some(level) = current.first().and_then(|v| v.as_u64()) {
             if let Some(levels) = dpi.get("levels").and_then(|v| v.as_array()) {
                 let value = levels.get(level as usize).and_then(|v| v.as_u64());
-                println!("dpi:        stage {} of {}{}", level, levels.len(),
-                    value.map(|v| format!(" ({v} DPI)")).unwrap_or_default());
+                println!(
+                    "dpi:        stage {} of {}{}",
+                    level,
+                    levels.len(),
+                    value.map(|v| format!(" ({v} DPI)")).unwrap_or_default()
+                );
             }
         }
     }
     if let Some(levels) = dpi.get("levels").and_then(|v| v.as_array()) {
-        let list: Vec<String> = levels.iter().filter_map(|v| v.as_u64().map(|n| n.to_string())).collect();
+        let list: Vec<String> = levels
+            .iter()
+            .filter_map(|v| v.as_u64().map(|n| n.to_string()))
+            .collect();
         println!("dpi levels: {}", list.join(" / "));
     }
 }
@@ -1848,7 +2185,12 @@ fn print_dpi_human(dpi: &serde_json::Map<String, serde_json::Value>) {
 fn print_info_human(value: &serde_json::Value) {
     let obj = value.as_object().unwrap();
     let get = |k: &str| obj.get(k).and_then(|v| v.as_str()).unwrap_or("-");
-    println!("device:     {} ({} via {})", get("vid:pid"), get("role"), get("path"));
+    println!(
+        "device:     {} ({} via {})",
+        get("vid:pid"),
+        get("role"),
+        get("path")
+    );
 
     let rows = [
         ("protocol", "protocol"),
@@ -1872,7 +2214,10 @@ fn print_info_human(value: &serde_json::Value) {
         obj.get("battery_percent").and_then(|v| v.as_u64()),
         obj.get("battery_state").and_then(|v| v.as_str()),
     ) {
-        let charging = obj.get("charging").and_then(|v| v.as_bool()).unwrap_or(false);
+        let charging = obj
+            .get("charging")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let extra = if charging { ", charging" } else { "" };
         println!("battery:    {pct}% ({state}{extra})");
     }
